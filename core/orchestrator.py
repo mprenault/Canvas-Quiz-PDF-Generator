@@ -9,6 +9,7 @@ Coordinates:
 """
 
 import asyncio
+import shutil
 from pathlib import Path
 from typing import Dict, Optional
 from rich.console import Console
@@ -17,7 +18,12 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
 from rich.live import Live
 from .rubric_converter import convert_rubric_to_templates, save_templates
 from .csv_parser import CanvasCSVParser
-from .html_generator import generate_student_html, load_template, sanitize_filename
+from .html_generator import (
+    generate_student_html,
+    load_template,
+    sanitize_filename,
+    generate_blank_template_html
+)
 from .pdf_generator import generate_pdf
 from .zip_creator import create_quiz_zip
 
@@ -64,24 +70,77 @@ def load_or_generate_templates(config: dict, force_regenerate: bool = False) -> 
     return templates
 
 
+async def generate_blank_templates(config: dict, templates: Dict[str, str]) -> None:
+    """Create Gradescope-ready blank HTML and PDF templates per question."""
+    quiz_id = config['quiz_id']
+    template_html_root = Path(f"output/quiz{quiz_id}/templates/html")
+    template_pdf_root = Path(f"output/quiz{quiz_id}/templates/pdf")
+    template_html_root.mkdir(parents=True, exist_ok=True)
+    template_pdf_root.mkdir(parents=True, exist_ok=True)
+
+    template_images_src = Path(f"templates/quiz{quiz_id}/images")
+    template_images_root = template_html_root / "images"
+    if template_images_src.exists():
+        if template_images_root.exists():
+            shutil.rmtree(template_images_root)
+        shutil.copytree(template_images_src, template_images_root)
+        console.print(f"   [green]✓[/green] Copied template images to {template_images_root}/")
+    else:
+        console.print(f"   [yellow]⚠[/yellow] Missing template images at {template_images_src}")
+
+    for group in config['question_groups']:
+        group_id = group['id']
+        console.print(f"\n[cyan]📄 Generating blank template for {group_id}[/cyan]")
+        blank_html = generate_blank_template_html(
+            templates[group_id],
+            group,
+            variant_to_show=group.get('template_variant', 1)
+        )
+
+        group_html_dir = template_html_root / group_id
+        group_html_dir.mkdir(parents=True, exist_ok=True)
+
+        group_images_dir = group_html_dir / "images"
+        if template_images_src.exists():
+            if group_images_dir.exists():
+                shutil.rmtree(group_images_dir)
+            shutil.copytree(template_images_src, group_images_dir)
+
+        html_path = group_html_dir / f"{group_id}_blank_template.html"
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(blank_html)
+
+        pdf_path = template_pdf_root / f"{group_id}_blank_template.pdf"
+        success = await generate_pdf(blank_html, str(pdf_path), str(html_path))
+
+        if success:
+            console.print(f"   [green]✓[/green] Blank PDF ready: {pdf_path}")
+        else:
+            console.print(f"   [red]✗[/red] Failed to render blank PDF for {group_id}")
+
+
 async def process_quiz(
-    csv_path: str,
+    csv_path: Optional[str],
     config: dict,
     limit: Optional[int] = None,
     student_name: Optional[str] = None,
     skip_zip: bool = False,
-    force_regenerate: bool = False
+    force_regenerate: bool = False,
+    templates_only: bool = False,
+    generate_templates: bool = True
 ) -> None:
     """
     Main workflow: CSV → HTML → PDFs
     
     Args:
-        csv_path: Path to Canvas CSV export
+        csv_path: Path to Canvas CSV export (optional when templates_only)
         config: Quiz configuration dict
         limit: Optional limit on number of students (for testing)
         student_name: Optional student name filter (case-insensitive, partial match)
         skip_zip: If True, skip creating zip file at the end
         force_regenerate: Force regeneration of templates
+        templates_only: If True, only produce blank templates
+        generate_templates: If False, skip blank template generation
     """
     quiz_id = config['quiz_id']
     quiz_name = config['quiz_name']
@@ -92,7 +151,20 @@ async def process_quiz(
     
     # Step 1: Load or generate templates
     templates = load_or_generate_templates(config, force_regenerate)
-    
+
+    if generate_templates:
+        await generate_blank_templates(config, templates)
+    else:
+        console.print(f"[dim]⏭ Skipping blank template generation (--no-templates)[/dim]")
+
+    if templates_only:
+        console.print(f"\n[dim]⏭ Templates-only mode: skipping student PDFs[/dim]")
+        return
+
+    if csv_path is None:
+        console.print("[red]✗[/red] CSV path is required to generate student files")
+        return
+
     # Step 2: Parse CSV
     console.print(f"\n[cyan]📊 Parsing CSV...[/cyan]")
     parser = CanvasCSVParser(csv_path, config)
@@ -122,7 +194,6 @@ async def process_quiz(
     
     # Copy images to output folder for each question group
     console.print(f"\n[cyan]📁 Setting up output directories...[/cyan]")
-    import shutil
     for group in config['question_groups']:
         group_id = group['id']
         group_name = group['name']

@@ -6,7 +6,7 @@ Takes HTML templates and student data, then:
 2. Replaces answer placeholders with student's HTML
 """
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from pathlib import Path
 from typing import Dict
 from .latex_converter import sanitize_student_answer
@@ -179,4 +179,119 @@ def generate_student_html(
 
 
 import re  # Need to import for sanitize_filename
+
+BLANK_TEMPLATE_CSS = """
+.blank-answer-section {
+    margin: 0.5em 0 1.5em 0;
+    padding: 0.75em;
+    border: 1px solid #999;
+    background-color: #fff;
+}
+.blank-answer-section h3 {
+    margin: 0 0 0.4em 0;
+    font-size: 10pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.blank-answer-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+}
+.blank-answer-line {
+    border-bottom: 1px solid #c4c4c4;
+    min-height: 16px;
+}
+"""
+
+
+def _create_blank_answer_section(soup: BeautifulSoup, part_letter: str) -> Tag:
+    """Build a blank answer grid for the specified part."""
+    section = soup.new_tag(
+        'div',
+        **{
+            'class': 'blank-answer-section',
+            'data-part': part_letter,
+        }
+    )
+    heading = soup.new_tag('h3')
+    heading.string = f"Answer (Part {part_letter.upper()})"
+    section.append(heading)
+
+    grid = soup.new_tag('div', **{'class': 'blank-answer-grid'})
+    for _ in range(10):
+        line = soup.new_tag('div', **{'class': 'blank-answer-line'})
+        grid.append(line)
+    section.append(grid)
+    return section
+
+
+def _insert_blank_student_info(soup: BeautifulSoup) -> None:
+    """Prepend a placeholder student info box that mirrors the real PDF."""
+    body = soup.find('body')
+    if not body:
+        return
+
+    info_div = soup.new_tag('div', **{
+        'class': 'student-info',
+        'style': 'background: #e3f2fd; padding: 1em; margin-bottom: 2em; border-radius: 5px;'
+    })
+
+    heading = soup.new_tag('h2')
+    heading['style'] = 'margin-top: 0;'
+    heading.string = 'Student: ____________________________'
+    info_div.append(heading)
+
+    sisid = soup.new_tag('p')
+    sisid['style'] = 'margin: 0;'
+    sisid.string = 'SISID: ____________________________'
+    info_div.append(sisid)
+
+    canvas_id = soup.new_tag('p')
+    canvas_id['style'] = 'margin: 0;'
+    canvas_id.string = 'Canvas ID: _______________________'
+    info_div.append(canvas_id)
+
+    body.insert(0, info_div)
+
+
+def generate_blank_template_html(
+    template_html: str,
+    group: dict,
+    variant_to_show: int = 1
+) -> str:
+    """
+    Generate a blank HTML template for Gradescope based on one variant.
+
+    Args:
+        template_html: HTML that contains all variants for the group.
+        group: Question group config dict.
+        variant_to_show: Variant number to keep (default: 1).
+
+    Returns:
+        HTML string with only the selected variant and blank answer grids.
+    """
+    html = hide_other_variants(template_html, variant_to_show)
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Remove solution blockquotes to keep only question text
+    for blockquote in soup.find_all('blockquote'):
+        blockquote.decompose()
+
+    # Replace student-answer sections with blank grids
+    for section in soup.find_all('div', class_='student-answer-section'):
+        part_letter = section.get('data-part', 'a')
+        blank_section = _create_blank_answer_section(soup, part_letter)
+        section.replace_with(blank_section)
+
+    # Attach blank template styles
+    if soup.head:
+        style_tag = soup.new_tag('style')
+        style_tag.string = BLANK_TEMPLATE_CSS
+        soup.head.append(style_tag)
+
+    # Add placeholder student info block
+    _insert_blank_student_info(soup)
+
+    return str(soup)
 

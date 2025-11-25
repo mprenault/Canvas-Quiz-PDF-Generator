@@ -164,6 +164,14 @@ python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --regenerate
 ╰──────────────────────────────────────────╯
 ```
 
+### Template Generation
+
+- Each run now refreshes Gradescope-ready blank templates in `output/quiz{quiz_id}/templates/`.
+  - `templates/html/<question_id>/<question_id>_blank_template.html` mirrors the question text with blank answer grids and placeholder student info.
+  - `templates/pdf/<question_id>_blank_template.pdf` is the rendered Gradescope template that matches the student PDFs.
+- Run `python run_quiz.py --quiz 5 --templates-only` to regenerate only the templates (no CSV required).
+- Add `--no-templates` to skip the extra blank-template pass when you only want student PDFs.
+
 ## Adding a New Quiz (Quiz 1, Quiz 6, etc.)
 
 ### Step 1: Gather Materials

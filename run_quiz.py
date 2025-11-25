@@ -37,6 +37,12 @@ Examples:
   
   # Force regenerate templates
   python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --regenerate
+
+  # Build only blank Gradescope templates (no CSV needed)
+  python run_quiz.py --quiz 5 --templates-only
+
+  # Skip blank template generation for a faster student-only run
+  python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --no-templates
         """
     )
     
@@ -50,8 +56,7 @@ Examples:
     parser.add_argument(
         '--csv',
         type=str,
-        required=True,
-        help='Path to Canvas CSV export'
+        help='Path to Canvas CSV export (required unless --templates-only)'
     )
     
     parser.add_argument(
@@ -67,6 +72,18 @@ Examples:
     )
     
     parser.add_argument(
+        '--templates-only',
+        action='store_true',
+        help='Only generate blank Gradescope templates and skip student PDFs'
+    )
+
+    parser.add_argument(
+        '--no-templates',
+        action='store_true',
+        help='Skip generating blank Gradescope templates'
+    )
+
+    parser.add_argument(
         '--no-zip',
         action='store_true',
         help='Skip creating zip file at the end'
@@ -80,10 +97,17 @@ Examples:
     
     args = parser.parse_args()
     
-    # Validate CSV exists
-    if not Path(args.csv).exists():
-        print(f"❌ Error: CSV file not found: {args.csv}")
+    if args.templates_only and args.no_templates:
+        print("❌ Cannot combine --templates-only and --no-templates")
         sys.exit(1)
+    
+    if not args.templates_only:
+        if not args.csv:
+            print("❌ --csv is required unless --templates-only is set")
+            sys.exit(1)
+        if not Path(args.csv).exists():
+            print(f"❌ Error: CSV file not found: {args.csv}")
+            sys.exit(1)
     
     # Load quiz config
     try:
@@ -98,15 +122,19 @@ Examples:
         print(f"❌ Error: configs/quiz{args.quiz}_config.py missing QUIZ_CONFIG variable")
         sys.exit(1)
     
+    csv_path = args.csv if args.csv else None
+
     # Run workflow
     try:
         asyncio.run(process_quiz(
-            args.csv,
+            csv_path,
             config,
             limit=args.limit,
             student_name=args.student,
             skip_zip=args.no_zip,
-            force_regenerate=args.regenerate
+            force_regenerate=args.regenerate,
+            templates_only=args.templates_only,
+            generate_templates=not args.no_templates
         ))
     except KeyboardInterrupt:
         print("\n\n⚠ Interrupted by user")
