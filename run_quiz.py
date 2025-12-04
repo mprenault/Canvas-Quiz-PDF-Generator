@@ -70,6 +70,12 @@ Examples:
         type=str,
         help='Generate PDFs for specific student by name (case-insensitive, partial match)'
     )
+
+    parser.add_argument(
+        '--question',
+        type=int,
+        help='Generate PDFs only for a specific question number (e.g. 1 for q1)'
+    )
     
     parser.add_argument(
         '--templates-only',
@@ -131,6 +137,7 @@ Examples:
             config,
             limit=args.limit,
             student_name=args.student,
+            question_number=args.question,
             skip_zip=args.no_zip,
             force_regenerate=args.regenerate,
             templates_only=args.templates_only,

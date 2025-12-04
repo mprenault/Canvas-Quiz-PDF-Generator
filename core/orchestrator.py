@@ -124,6 +124,7 @@ async def process_quiz(
     config: dict,
     limit: Optional[int] = None,
     student_name: Optional[str] = None,
+    question_number: Optional[int] = None,
     skip_zip: bool = False,
     force_regenerate: bool = False,
     templates_only: bool = False,
@@ -137,6 +138,7 @@ async def process_quiz(
         config: Quiz configuration dict
         limit: Optional limit on number of students (for testing)
         student_name: Optional student name filter (case-insensitive, partial match)
+        question_number: Optional question number to filter (e.g. 1 for q1)
         skip_zip: If True, skip creating zip file at the end
         force_regenerate: Force regeneration of templates
         templates_only: If True, only produce blank templates
@@ -148,6 +150,22 @@ async def process_quiz(
     # Display header
     header_text = f"[bold cyan]Canvas Quiz PDF Generator[/bold cyan]\n[yellow]Quiz {quiz_id}: {quiz_name}[/yellow]"
     console.print(Panel(header_text, border_style="cyan", padding=(1, 2)))
+    
+    # Filter question groups if specific question requested
+    if question_number is not None:
+        target_id = f"q{question_number}"
+        original_groups = config['question_groups']
+        config['question_groups'] = [
+            g for g in original_groups 
+            if g['id'] == target_id
+        ]
+        
+        if not config['question_groups']:
+            console.print(f"[red]✗[/red] Error: Question 'q{question_number}' not found in config")
+            console.print(f"   [dim]Available questions: {', '.join([g['id'] for g in original_groups])}[/dim]")
+            return
+        
+        console.print(f"[cyan]ℹ Filtering for question: {target_id}[/cyan]")
     
     # Step 1: Load or generate templates
     templates = load_or_generate_templates(config, force_regenerate)
@@ -315,14 +333,14 @@ async def process_quiz(
   [bold cyan]Timing:[/bold cyan]
   Total: [green]{total_time:.1f}s[/green] ({total_time/60:.1f}m)
   Avg per student: [green]{avg_time:.1f}s[/green]
-  Range: [green]{min_time:.1f}s[/green] - [yellow]{max_time:.1f}s[/yellow]
-  
-  [dim]├── {config['question_groups'][0]['id']}_{config['question_groups'][0]['name'].lower().replace(' ', '_')}/[/dim]
-  [dim]│   ├── html/ ({len(students)} files)[/dim]
-  [dim]│   └── pdf/ ({len(students)} files)[/dim]
-  [dim]└── {config['question_groups'][1]['id']}_{config['question_groups'][1]['name'].lower().replace(' ', '_')}/[/dim]
-  [dim]    ├── html/ ({len(students)} files)[/dim]
-  [dim]    └── pdf/ ({len(students)} files)[/dim]"""
+  Range: [green]{min_time:.1f}s[/green] - [yellow]{max_time:.1f}s[/yellow]"""
+
+    for i, group in enumerate(config['question_groups']):
+        prefix = "└──" if i == len(config['question_groups']) - 1 else "├──"
+        group_dir = f"{group['id']}_{group['name'].lower().replace(' ', '_')}"
+        summary_text += f"\n  [dim]{prefix} {group_dir}/[/dim]"
+        summary_text += f"\n  [dim]    ├── html/ ({len(students)} files)[/dim]"
+        summary_text += f"\n  [dim]    └── pdf/ ({len(students)} files)[/dim]"
     
     console.print(Panel(summary_text, border_style="green", padding=(1, 2)))
     

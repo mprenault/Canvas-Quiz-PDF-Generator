@@ -135,6 +135,9 @@ python run_quiz.py --quiz 5 --csv "Quiz 5 - Network Flow.csv"
 
 # Force regenerate templates (if rubric changed)
 python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --regenerate
+
+# Generate PDFs only for Question 1 (faster if only Q1 changed)
+python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --question 1
 ```
 
 ### CLI Output
