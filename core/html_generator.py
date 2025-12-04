@@ -234,7 +234,7 @@ def _insert_blank_student_info(soup: BeautifulSoup) -> None:
 
     heading = soup.new_tag('h2')
     heading['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
-    heading.string = 'Student: ____________________________'
+    heading.string = 'Student: ___________________'
     info_div.append(heading)
 
     sisid = soup.new_tag('p')
