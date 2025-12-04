@@ -138,6 +138,9 @@ python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --regenerate
 
 # Generate PDFs only for Question 1 (faster if only Q1 changed)
 python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --question 1
+
+# Run with increased parallelism (3 concurrent jobs, max 4)
+python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --jobs 3
 ```
 
 ### CLI Output

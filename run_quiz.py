@@ -101,10 +101,21 @@ Examples:
         help='Force regenerate HTML templates from rubric'
     )
     
+    parser.add_argument(
+        '--jobs',
+        type=int,
+        default=2,
+        help='Number of parallel jobs (1-4, default: 2)'
+    )
+    
     args = parser.parse_args()
     
     if args.templates_only and args.no_templates:
         print("❌ Cannot combine --templates-only and --no-templates")
+        sys.exit(1)
+
+    if args.jobs < 1 or args.jobs > 4:
+        print("❌ --jobs must be between 1 and 4")
         sys.exit(1)
     
     if not args.templates_only:
@@ -141,7 +152,8 @@ Examples:
             skip_zip=args.no_zip,
             force_regenerate=args.regenerate,
             templates_only=args.templates_only,
-            generate_templates=not args.no_templates
+            generate_templates=not args.no_templates,
+            jobs=args.jobs
         ))
     except KeyboardInterrupt:
         print("\n\n⚠ Interrupted by user")

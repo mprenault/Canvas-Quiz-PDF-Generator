@@ -128,7 +128,8 @@ async def process_quiz(
     skip_zip: bool = False,
     force_regenerate: bool = False,
     templates_only: bool = False,
-    generate_templates: bool = True
+    generate_templates: bool = True,
+    jobs: int = 2
 ) -> None:
     """
     Main workflow: CSV → HTML → PDFs
@@ -143,6 +144,7 @@ async def process_quiz(
         force_regenerate: Force regeneration of templates
         templates_only: If True, only produce blank templates
         generate_templates: If False, skip blank template generation
+        jobs: Number of parallel jobs (default: 2)
     """
     quiz_id = config['quiz_id']
     quiz_name = config['quiz_name']
@@ -248,32 +250,35 @@ async def process_quiz(
         console=console,
     )
     
-    with Live(progress, console=console, refresh_per_second=4):
-        task_id = progress.add_task(
-            "[cyan]Processing students...",
-            total=len(students)
-        )
-        
-        for student_idx, student in enumerate(students, 1):
+    # Create semaphore to limit concurrency
+    concurrency_limit = jobs
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    
+    async def process_student(student_idx: int, student: dict, task_id):
+        async with semaphore:
             student_start = time.time()
             
-            # Calculate running average and estimate
+            # Calculate running average and estimate (using shared list)
+            # Note: This simple average might fluctuate more with parallel execution
             if student_times:
                 avg_time = sum(student_times) / len(student_times)
+                # Remaining is based on total completed
                 remaining_students = len(students) - len(student_times)
-                est_remaining = remaining_students * avg_time
+                # Adjust estimate based on concurrency
+                est_remaining = (remaining_students * avg_time) / concurrency_limit
                 
                 desc = f"[cyan]Processing: {student['name']}[/cyan]\n[dim]  Avg: {avg_time:.1f}s/student"
                 if est_remaining >= 60:
                     desc += f" • Est: {est_remaining/60:.0f}m {est_remaining%60:.0f}s remaining"
                 else:
                     desc += f" • Est: {est_remaining:.0f}s remaining"
-                desc += "[/dim]"
+                desc += f" • [yellow]{concurrency_limit}x Parallel[/yellow][/dim]"
             else:
                 desc = f"[cyan]Processing: {student['name']}[/cyan]"
             
             progress.update(task_id, description=desc)
             
+            student_pdf_count = 0
             for group in config['question_groups']:
                 group_id = group['id']
                 group_name = group['name']
@@ -310,7 +315,7 @@ async def process_quiz(
                 success = await generate_pdf(html, pdf_path, html_path)
                 
                 if success:
-                    pdf_count += 1
+                    student_pdf_count += 1
             
             # Track timing
             student_elapsed = time.time() - student_start
@@ -318,6 +323,23 @@ async def process_quiz(
             
             # Update progress
             progress.update(task_id, advance=1)
+            return student_pdf_count
+
+    with Live(progress, console=console, refresh_per_second=4):
+        task_id = progress.add_task(
+            "[cyan]Processing students...",
+            total=len(students)
+        )
+        
+        # Create tasks for all students
+        tasks = [
+            process_student(i, student, task_id) 
+            for i, student in enumerate(students, 1)
+        ]
+        
+        # Run all tasks (concurrency limited by semaphore)
+        results = await asyncio.gather(*tasks)
+        pdf_count = sum(results)
     
     # Summary with timing statistics
     console.print()
