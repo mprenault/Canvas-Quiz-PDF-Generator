@@ -152,23 +152,18 @@ def generate_student_html(
     # Create student info header
     info_div = soup.new_tag('div', **{
         'class': 'student-info',
-        'style': 'background: #e3f2fd; padding: 1em; margin-bottom: 2em; border-radius: 5px;'
+        'style': 'display: flex; flex-direction: column; gap: 0.5em; background: #e3f2fd; padding: 1em; margin-bottom: 2em; border-radius: 5px;'
     })
     
     info_heading = soup.new_tag('h2')
-    info_heading['style'] = 'margin-top: 0;'
+    info_heading['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
     info_heading.string = f"Student: {student_data['name']}"
     info_div.append(info_heading)
     
     info_sisid = soup.new_tag('p')
-    info_sisid['style'] = 'margin: 0;'
+    info_sisid['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
     info_sisid.string = f"SISID: {student_data.get('sisid', 'N/A')}"
     info_div.append(info_sisid)
-    
-    info_id = soup.new_tag('p')
-    info_id['style'] = 'margin: 0;'
-    info_id.string = f"Canvas ID: {student_data.get('id', 'N/A')}"
-    info_div.append(info_id)
     
     # Insert at top of body
     body = soup.find('body')
@@ -234,23 +229,18 @@ def _insert_blank_student_info(soup: BeautifulSoup) -> None:
 
     info_div = soup.new_tag('div', **{
         'class': 'student-info',
-        'style': 'background: #e3f2fd; padding: 1em; margin-bottom: 2em; border-radius: 5px;'
+        'style': 'display: flex; flex-direction: column; gap: 0.5em; background: #e3f2fd; padding: 1em; margin-bottom: 2em; border-radius: 5px;'
     })
 
     heading = soup.new_tag('h2')
-    heading['style'] = 'margin-top: 0;'
+    heading['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
     heading.string = 'Student: ____________________________'
     info_div.append(heading)
 
     sisid = soup.new_tag('p')
-    sisid['style'] = 'margin: 0;'
+    sisid['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
     sisid.string = 'SISID: ____________________________'
     info_div.append(sisid)
-
-    canvas_id = soup.new_tag('p')
-    canvas_id['style'] = 'margin: 0;'
-    canvas_id.string = 'Canvas ID: _______________________'
-    info_div.append(canvas_id)
 
     body.insert(0, info_div)
 
