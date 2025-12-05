@@ -132,7 +132,8 @@ async def process_quiz(
     generate_templates: bool = True,
     jobs: int = 2,
     skip_merge: bool = False,
-    merge_only: bool = False
+    merge_only: bool = False,
+    email_mapping: Optional[Dict[str, str]] = None
 ) -> None:
     """
     Main workflow: CSV → HTML → PDFs
@@ -151,6 +152,7 @@ async def process_quiz(
         jobs: Number of parallel jobs (default: 2)
         skip_merge: If True, skip merging PDFs
         merge_only: If True, skip generation and only merge existing PDFs
+        email_mapping: Optional dict mapping SIS User ID -> Email
     """
     quiz_id = config['quiz_id']
     quiz_name = config['quiz_name']
@@ -198,7 +200,7 @@ async def process_quiz(
     if not merge_only:
         # Step 2: Parse CSV
         console.print(f"\n[cyan]📊 Parsing CSV...[/cyan]")
-        parser = CanvasCSVParser(csv_path, config)
+        parser = CanvasCSVParser(csv_path, config, email_mapping=email_mapping)
         all_students = parser.get_student_data(limit=None)  # Get all students first
         
         # Filter by student name if provided

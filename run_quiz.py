@@ -137,7 +137,60 @@ Examples:
         if not Path(args.csv).exists():
             print(f"❌ Error: CSV file not found: {args.csv}")
             sys.exit(1)
+            
+    # Auto-load email mapping
+    email_mapping = None
+    mapping_path = Path("configs/student_emails.json")
     
+    if mapping_path.exists():
+        try:
+            import json
+            with open(mapping_path, 'r') as f:
+                email_mapping = json.load(f)
+            print(f"✅ Loaded email mapping for {len(email_mapping)} students")
+        except Exception as e:
+            print(f"❌ Error loading {mapping_path}: {e}")
+            sys.exit(1)
+    else:
+        print(f"\n⚠️  Email mapping not found at {mapping_path}")
+        print("   Attempting to auto-generate from Grades CSV...")
+        
+        # Try to find a Grades CSV in the current directory or test_data
+        candidates = list(Path("test_data").glob("*Grades-*.csv"))
+        
+        if not candidates:
+             print("❌ No Grades CSV found in test_data/ matching '*Grades-*.csv'")
+             print("   Please run manually: python utils/create_email_mapping.py <grades_csv>")
+             # We don't exit here, just continue without email mapping? 
+             # Or exit? The user said "run it automatically". It's better to fail if we can't do it.
+             # But if they don't have the file, we can't do it.
+             print("   Continuing without email mapping (emails will be missing)...")
+        else:
+            # Pick the most recent one
+            best_candidate = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+            print(f"   Found candidate: {best_candidate}")
+            
+            try:
+                # Import util logic dynamically
+                import sys
+                sys.path.append(str(Path("utils").absolute()))
+                from create_email_mapping import create_mapping
+                
+                # Make sure configs dir exists
+                mapping_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                create_mapping(str(best_candidate), str(mapping_path))
+                
+                # Reload
+                import json
+                with open(mapping_path, 'r') as f:
+                    email_mapping = json.load(f)
+                print(f"✅ Generated and loaded email mapping for {len(email_mapping)} students")
+                
+            except Exception as e:
+                print(f"❌ Failed to auto-generate mapping: {e}")
+                print("   Continuing without email mapping...")
+
     # Load quiz config
     try:
         config_module = import_module(f'configs.quiz{args.quiz}_config')
@@ -167,7 +220,8 @@ Examples:
             generate_templates=not args.no_templates,
             jobs=args.jobs,
             skip_merge=args.no_merge,
-            merge_only=args.merge_only
+            merge_only=args.merge_only,
+            email_mapping=email_mapping
         ))
     except KeyboardInterrupt:
         print("\n\n⚠ Interrupted by user")

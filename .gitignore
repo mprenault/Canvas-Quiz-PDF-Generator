@@ -1,6 +1,7 @@
 # Proprietary quiz configurations
 configs/*.py
 !configs/__init__.py
+configs/*.json
 
 # Test data (SENSITIVE - contains mock quiz questions/answers)
 test_data/

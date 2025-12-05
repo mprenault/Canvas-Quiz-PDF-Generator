@@ -18,16 +18,18 @@ class CanvasCSVParser:
     Parse Canvas quiz CSV with variant-specific Part A and shared Part B/C columns.
     """
     
-    def __init__(self, csv_path: str, config: dict):
+    def __init__(self, csv_path: str, config: dict, email_mapping: Optional[Dict[str, str]] = None):
         """
         Initialize parser with CSV file and quiz configuration.
         
         Args:
             csv_path: Path to Canvas CSV export
             config: Quiz configuration dict
+            email_mapping: Optional dict mapping SIS User ID -> Email
         """
         self.csv_path = csv_path
         self.config = config
+        self.email_mapping = email_mapping or {}
         self.df = pd.read_csv(csv_path)
         
         # Build column mappings
@@ -201,9 +203,15 @@ class CanvasCSVParser:
         df_subset = self.df.head(limit) if limit else self.df
         
         for idx, row in df_subset.iterrows():
+            sisid = str(row['SISID']) if pd.notna(row.get('SISID')) else ''
+            
+            # Lookup email if mapping exists
+            email = self.email_mapping.get(sisid, '')
+            
             student = {
                 'name': str(row['Name']),
-                'sisid': str(row['SISID']) if pd.notna(row.get('SISID')) else '',
+                'sisid': sisid,
+                'email': email,
                 'id': str(row['ID']) if pd.notna(row.get('ID')) else '',
             }
             

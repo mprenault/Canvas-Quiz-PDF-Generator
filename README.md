@@ -16,6 +16,7 @@ A production-ready Python system that converts Canvas LMS quiz exports (CSV form
 - ✅ **Page Break Control**: Configurable per question (same-page or each-part)
 - ✅ **Compact Styling**: LaTeX-matching format (~1 page for Q1, ~4 pages for Q2)
 - ✅ **Rich CLI**: Progress bars, timing statistics, colored output
+- ✅ **Email Integration**: Auto-maps student emails from Grades CSV to PDFs
 - ✅ **Generic Architecture**: Config-driven system works for all 6 quizzes
 
 ## Problem Statement
@@ -483,6 +484,10 @@ canvas-quiz-csv-html-pdf/
 │   │       ├── html/
 │   │       └── pdf/
 │   └── quiz6/                   # Auto-generated
+│
+├── utils/                       # Utility scripts
+│   ├── create_email_mapping.py  # Generates SISID -> Email JSON
+│   └── create_quiz_zip.py       # Standalone zipper
 │
 ├── run_quiz.py                  # Main CLI entry point
 ├── test_rubric_converter.py     # Template generation tester

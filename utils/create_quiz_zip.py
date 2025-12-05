@@ -11,6 +11,10 @@ import argparse
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from core.zip_creator import create_quiz_zip
 
 console = Console()

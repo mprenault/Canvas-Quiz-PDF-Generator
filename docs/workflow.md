@@ -61,14 +61,22 @@ Located in `core/orchestrator.py`.
 To optimize performance, the system processes students concurrently.
 *   **Concurrency**: Uses `asyncio` with a `Semaphore` to limit active jobs (default: 2, max: 10). This prevents system overload since browser rendering is memory-intensive.
 
-### 5. HTML Generation
+### 5. Email Integration
+Located in `run_quiz.py` (auto-generation) and `core/csv_parser.py` (injection).
+*   **Problem**: Student analysis reports contain SIS IDs but not emails.
+*   **Solution**:
+    1.  **Auto-Discovery**: On start, `run_quiz.py` checks for `configs/student_emails.json`.
+    2.  **Auto-Generation**: If missing, it automatically scans `test_data/` for the latest Grades CSV (which contains emails) and generates the mapping file using `utils/create_email_mapping.py`.
+    3.  **Injector**: During CSV parsing, emails are injected into the student data object via a lookup from this mapping.
+
+### 6. HTML Generation
 Located in `core/html_generator.py`.
 For every student and every question:
 1.  Loads the generic HTML template for the question group.
-2.  Injects specific student data: **Name**, **SISID**, **Variant Number**, and **Answers**.
+2.  Injects specific student data: **Name**, **Email**, **SISID**, **Variant Number**, and **Answers**.
 3.  Saves a temporary HTML file (e.g., `output/.../html/q1v5_Alice.html`).
 
-### 6. PDF Rendering
+### 7. PDF Rendering
 Located in `core/pdf_generator.py`.
 This step ensures visual fidelity, particularly for math equations.
 *   **Engine**: Uses **Playwright** to launch a headless Chromium browser.
@@ -78,13 +86,13 @@ This step ensures visual fidelity, particularly for math equations.
     3.  Prints the page to PDF.
 *   **Why Browser?**: Standard HTML-to-PDF tools often fail to execute the JavaScript required for MathJax, leading to broken equations.
 
-### 7. PDF Merging
+### 8. PDF Merging
 Located in `core/pdf_merger.py`.
 *   **Aggregation**: Combines all individual student PDFs for a specific question group into a single "Big PDF" (e.g., `q1_merged.pdf`).
 *   **Sorting**: Ensures PDFs are merged in a specific order (e.g., all Variant 1s, then Variant 2s) to facilitate organized grading.
 *   **Control**: Can be skipped with `--no-merge` or run independently with `--merge-only`.
 
-### 8. Final Packaging
+### 9. Final Packaging
 Located in `core/zip_creator.py`.
 *   Walks the output directory.
 *   Aggregates all generated PDFs into a single ZIP file, organized by question, ready for upload to grading platforms like Gradescope.

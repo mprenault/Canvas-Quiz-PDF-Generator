@@ -156,12 +156,18 @@ def generate_student_html(
     })
     
     info_heading = soup.new_tag('h2')
-    info_heading['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
+    info_heading['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
     info_heading.string = f"Student: {student_data['name']}"
     info_div.append(info_heading)
     
+    if student_data.get('email'):
+        info_email = soup.new_tag('p')
+        info_email['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
+        info_email.string = f"Email: {student_data['email']}"
+        info_div.append(info_email)
+
     info_sisid = soup.new_tag('p')
-    info_sisid['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
+    info_sisid['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
     info_sisid.string = f"SISID: {student_data.get('sisid', 'N/A')}"
     info_div.append(info_sisid)
     
@@ -233,12 +239,17 @@ def _insert_blank_student_info(soup: BeautifulSoup) -> None:
     })
 
     heading = soup.new_tag('h2')
-    heading['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
+    heading['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
     heading.string = 'Student: ___________________'
     info_div.append(heading)
 
+    email = soup.new_tag('p')
+    email['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
+    email.string = 'Email: _____________________'
+    info_div.append(email)
+
     sisid = soup.new_tag('p')
-    sisid['style'] = 'margin: 0; font-size: 2.5em; line-height: 1.2;'
+    sisid['style'] = 'margin: 0; font-size: 1.5em; line-height: 1.2;'
     sisid.string = 'SISID: ____________________________'
     info_div.append(sisid)
 
