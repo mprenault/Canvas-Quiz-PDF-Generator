@@ -48,20 +48,38 @@ class CanvasCSVParser:
         """
         Find all tagged columns (Part A for each variant).
         
+        Supports two tag formats:
+        - Quiz 5 style: "1.1", "1.2", "2.3" (X.Y format)
+        - Quiz 6 style: "1.", "2.", "10." (X. followed by space/text)
+        
         Returns:
             Dict mapping tag → column index
-            Example: {'1.1': 11, '1.5': 51, '2.3': 101}
+            Example: {'1.1': 11, '1.5': 51} or {'1.': 11, '2.': 26}
         """
         variant_cols = {}
+        
+        # Get expected tags from config to determine format
+        all_expected_tags = []
+        for group in self.config['question_groups']:
+            all_expected_tags.extend(group['variant_tags'])
         
         for col_idx, col_name in enumerate(self.df.columns):
             col_text = str(col_name).strip()
             
-            # Match X.Y at start of column text
+            # Try Quiz 5 format first: X.Y at start (e.g., "1.1", "2.3")
             match = re.match(r'^(\d+\.\d+)', col_text)
             if match:
                 tag = match.group(1)
-                variant_cols[tag] = col_idx
+                if tag in all_expected_tags:
+                    variant_cols[tag] = col_idx
+                continue
+            
+            # Try Quiz 6 format: X. followed by space (e.g., "1. You will show...")
+            match = re.match(r'^(\d+\.)\s', col_text)
+            if match:
+                tag = match.group(1)
+                if tag in all_expected_tags:
+                    variant_cols[tag] = col_idx
         
         return variant_cols
     
@@ -70,6 +88,9 @@ class CanvasCSVParser:
         Find shared subpart columns (Part B, Part C).
         
         These columns are used by ALL variants within a question group.
+        
+        Uses config's 'shared_patterns' if available (Quiz 6 style),
+        otherwise falls back to hardcoded Quiz 5 patterns.
         
         Returns:
             Dict mapping identifier → column index
@@ -81,6 +102,19 @@ class CanvasCSVParser:
         """
         shared = {}
         
+        # Check if config has shared_patterns (Quiz 6 style)
+        if 'shared_patterns' in self.config:
+            patterns = self.config['shared_patterns']
+            for col_idx, col_name in enumerate(self.df.columns):
+                col_text = str(col_name).lower().strip()
+                for key, pattern in patterns.items():
+                    # Match columns that START with the pattern (not just contain it)
+                    # This avoids false matches like "1. You will show... Part B:"
+                    if col_text.startswith(pattern.lower()):
+                        shared[key] = col_idx
+            return shared
+        
+        # Fallback: Hardcoded Quiz 5 patterns (backward compatibility)
         for col_idx, col_name in enumerate(self.df.columns):
             col_text = str(col_name).lower().strip()
             
@@ -249,7 +283,9 @@ class CanvasCSVParser:
     def print_student_summary(self, student: Dict) -> None:
         """Print a summary of one student's data (for debugging)."""
         print(f"\n  Student: {student['name']}")
-        for group_id in ['q1', 'q2']:
+        # Dynamically get group IDs from config instead of hardcoding
+        for group in self.config['question_groups']:
+            group_id = group['id']
             if group_id in student:
                 data = student[group_id]
                 print(f"    {group_id}: Variant {data['variant']} (tag: {data['tag']})")
