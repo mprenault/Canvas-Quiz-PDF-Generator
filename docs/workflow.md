@@ -35,7 +35,7 @@ graph TD
 ## Detailed Workflow
 
 ### 1. Initialization & Configuration
-*   **Entry Point**: `run_quiz.py` serves as the CLI driver. It accepts arguments for the quiz number, input CSV, and concurrency settings.
+*   **Entry Point**: `run_quiz.py` serves as the CLI driver. It accepts arguments for the quiz number, input CSV, concurrency settings, and workflow control flags (`--merge-only`, `--no-merge`).
 *   **Config Loading**: The system loads a specific configuration file (e.g., `configs/quiz5_config.py`). This file defines the quiz structure, including:
     *   Question groups (e.g., "Question 1").
     *   Variant definitions (e.g., variants 1.1 through 1.9).
@@ -59,7 +59,7 @@ This step handles the complexity of Canvas exports where data is sparse and colu
 ### 4. Parallel Processing
 Located in `core/orchestrator.py`.
 To optimize performance, the system processes students concurrently.
-*   **Concurrency**: Uses `asyncio` with a `Semaphore` to limit active jobs (default: 2). This prevents system overload since browser rendering is memory-intensive.
+*   **Concurrency**: Uses `asyncio` with a `Semaphore` to limit active jobs (default: 2, max: 10). This prevents system overload since browser rendering is memory-intensive.
 
 ### 5. HTML Generation
 Located in `core/html_generator.py`.
@@ -78,7 +78,13 @@ This step ensures visual fidelity, particularly for math equations.
     3.  Prints the page to PDF.
 *   **Why Browser?**: Standard HTML-to-PDF tools often fail to execute the JavaScript required for MathJax, leading to broken equations.
 
-### 7. Final Packaging
+### 7. PDF Merging
+Located in `core/pdf_merger.py`.
+*   **Aggregation**: Combines all individual student PDFs for a specific question group into a single "Big PDF" (e.g., `q1_merged.pdf`).
+*   **Sorting**: Ensures PDFs are merged in a specific order (e.g., all Variant 1s, then Variant 2s) to facilitate organized grading.
+*   **Control**: Can be skipped with `--no-merge` or run independently with `--merge-only`.
+
+### 8. Final Packaging
 Located in `core/zip_creator.py`.
 *   Walks the output directory.
 *   Aggregates all generated PDFs into a single ZIP file, organized by question, ready for upload to grading platforms like Gradescope.

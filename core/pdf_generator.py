@@ -34,9 +34,9 @@ async def generate_pdf(html_content: str, output_path: str, html_file_path: str 
             # Load HTML - use file path if provided (for proper image paths)
             if html_file_path:
                 html_file_url = f"file://{Path(html_file_path).absolute()}"
-                await page.goto(html_file_url)
+                await page.goto(html_file_url, timeout=60000)
             else:
-                await page.set_content(html_content)
+                await page.set_content(html_content, timeout=60000)
             
             await page.wait_for_load_state('networkidle')
             

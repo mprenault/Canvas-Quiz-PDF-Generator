@@ -59,7 +59,7 @@ The core of the parallelization relies on Python's `asyncio` library.
 #### `run_quiz.py`
 
 *   Added a `--jobs` argument to the CLI.
-*   Allows users to specify the concurrency limit (default: 2, max: 4).
+*   Allows users to specify the concurrency limit (default: 2, max: 10).
 
 ## Performance Impact
 
@@ -77,11 +77,11 @@ python run_quiz.py --quiz 5 --csv "data.csv"
 # Faster (3 jobs)
 python run_quiz.py --quiz 5 --csv "data.csv" --jobs 3
 
-# Maximum speed (4 jobs)
-python run_quiz.py --quiz 5 --csv "data.csv" --jobs 4
+# Maximum speed (10 jobs)
+python run_quiz.py --quiz 5 --csv "data.csv" --jobs 10
 ```
 
-## Why Limit to 4?
+## Why Limit to 10?
 
 Each job spawns a headless Chromium instance via Playwright. These are memory and CPU intensive.
 *   **Memory**: Each browser instance can consume 100MB-500MB+.
@@ -92,4 +92,4 @@ Running too many concurrent jobs can lead to:
 2.  Browser crashes / timeouts.
 3.  Diminishing returns (CPU thrashing).
 
-We found 2-4 to be the sweet spot for typical developer machines.
+We found 2-4 to be the sweet spot for typical developer machines, but allow up to 10 for powerful workstations.

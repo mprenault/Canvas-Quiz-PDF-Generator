@@ -12,9 +12,9 @@ import asyncio
 import shutil
 from pathlib import Path
 from typing import Dict, Optional
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.live import Live
 from .rubric_converter import convert_rubric_to_templates, save_templates
 from .csv_parser import CanvasCSVParser
@@ -26,6 +26,7 @@ from .html_generator import (
 )
 from .pdf_generator import generate_pdf
 from .zip_creator import create_quiz_zip
+from .pdf_merger import merge_pdfs
 
 console = Console()
 
@@ -129,7 +130,9 @@ async def process_quiz(
     force_regenerate: bool = False,
     templates_only: bool = False,
     generate_templates: bool = True,
-    jobs: int = 2
+    jobs: int = 2,
+    skip_merge: bool = False,
+    merge_only: bool = False
 ) -> None:
     """
     Main workflow: CSV → HTML → PDFs
@@ -144,7 +147,10 @@ async def process_quiz(
         force_regenerate: Force regeneration of templates
         templates_only: If True, only produce blank templates
         generate_templates: If False, skip blank template generation
+        generate_templates: If False, skip blank template generation
         jobs: Number of parallel jobs (default: 2)
+        skip_merge: If True, skip merging PDFs
+        merge_only: If True, skip generation and only merge existing PDFs
     """
     quiz_id = config['quiz_id']
     quiz_name = config['quiz_name']
@@ -169,10 +175,14 @@ async def process_quiz(
         
         console.print(f"[cyan]ℹ Filtering for question: {target_id}[/cyan]")
     
-    # Step 1: Load or generate templates
-    templates = load_or_generate_templates(config, force_regenerate)
+    if merge_only:
+        console.print(f"\n[bold yellow]⏭ MERGE ONLY MODE: Skipping HTML/PDF generation[/bold yellow]")
+        # Skip to merging step
+    else:
+        # Step 1: Load or generate templates
+        templates = load_or_generate_templates(config, force_regenerate)
 
-    if generate_templates:
+    if generate_templates and not merge_only:
         await generate_blank_templates(config, templates)
     else:
         console.print(f"[dim]⏭ Skipping blank template generation (--no-templates)[/dim]")
@@ -181,191 +191,236 @@ async def process_quiz(
         console.print(f"\n[dim]⏭ Templates-only mode: skipping student PDFs[/dim]")
         return
 
-    if csv_path is None:
+    if csv_path is None and not merge_only:
         console.print("[red]✗[/red] CSV path is required to generate student files")
         return
 
-    # Step 2: Parse CSV
-    console.print(f"\n[cyan]📊 Parsing CSV...[/cyan]")
-    parser = CanvasCSVParser(csv_path, config)
-    all_students = parser.get_student_data(limit=None)  # Get all students first
-    
-    # Filter by student name if provided
-    if student_name:
-        if limit:
-            console.print(f"   [yellow]⚠[/yellow] Note: --limit ignored when using --student filter")
-        search_name = student_name.lower().strip()
-        students = [
-            s for s in all_students 
-            if search_name in s['name'].lower()
-        ]
-        if not students:
-            console.print(f"\n[red]✗[/red] Error: No students found matching '{student_name}'")
-            console.print(f"   [dim]Available students: {', '.join([s['name'] for s in all_students[:10]])}...[/dim]")
-            return
-        console.print(f"   [green]✓[/green] Found {len(students)} student(s) matching '{student_name}'")
-        if len(students) > 1:
-            console.print(f"   [yellow]⚠[/yellow] Multiple matches: {', '.join([s['name'] for s in students])}")
-    else:
-        students = all_students
-        if limit:
-            students = students[:limit]
-            console.print(f"   [yellow]⚠ Limited to {limit} students for testing[/yellow]")
-    
-    # Copy images to output folder for each question group
-    console.print(f"\n[cyan]📁 Setting up output directories...[/cyan]")
-    for group in config['question_groups']:
-        group_id = group['id']
-        group_name = group['name']
-        base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
+    if not merge_only:
+        # Step 2: Parse CSV
+        console.print(f"\n[cyan]📊 Parsing CSV...[/cyan]")
+        parser = CanvasCSVParser(csv_path, config)
+        all_students = parser.get_student_data(limit=None)  # Get all students first
         
-        # Copy images from templates to output
-        template_images = Path(f"templates/quiz{quiz_id}/images")
-        output_images = Path(f"{base_dir}/html/images")
+        # Filter by student name if provided
+        if student_name:
+            if limit:
+                console.print(f"   [yellow]⚠[/yellow] Note: --limit ignored when using --student filter")
+            search_name = student_name.lower().strip()
+            students = [
+                s for s in all_students 
+                if search_name in s['name'].lower()
+            ]
+            if not students:
+                console.print(f"\n[red]✗[/red] Error: No students found matching '{student_name}'")
+                console.print(f"   [dim]Available students: {', '.join([s['name'] for s in all_students[:10]])}...[/dim]")
+                return
+            console.print(f"   [green]✓[/green] Found {len(students)} student(s) matching '{student_name}'")
+            if len(students) > 1:
+                console.print(f"   [yellow]⚠[/yellow] Multiple matches: {', '.join([s['name'] for s in students])}")
+        else:
+            students = all_students
+            if limit:
+                students = students[:limit]
+                console.print(f"   [yellow]⚠ Limited to {limit} students for testing[/yellow]")
         
-        if template_images.exists():
-            if output_images.exists():
-                shutil.rmtree(output_images)
-            shutil.copytree(template_images, output_images)
-            console.print(f"   [green]✓[/green] Copied images to {base_dir}/html/images/")
-    
-    # Step 3: Generate PDFs for each student with progress bar
-    total_pdfs = len(students) * len(config['question_groups'])
-    console.print(f"\n[cyan]📄 Generating {total_pdfs} PDFs[/cyan] [dim]({len(students)} students × {len(config['question_groups'])} questions)[/dim]")
-    
-    pdf_count = 0
-    student_times = []
-    import time
-    overall_start = time.time()
-    
-    # Create progress bar
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TextColumn("•"),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeElapsedColumn(),
-        console=console,
-    )
-    
-    # Create semaphore to limit concurrency
-    concurrency_limit = jobs
-    semaphore = asyncio.Semaphore(concurrency_limit)
-    
-    async def process_student(student_idx: int, student: dict, task_id):
-        async with semaphore:
-            student_start = time.time()
+        # Copy images to output folder for each question group
+        console.print(f"\n[cyan]📁 Setting up output directories...[/cyan]")
+        for group in config['question_groups']:
+            group_id = group['id']
+            group_name = group['name']
+            base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
             
-            # Calculate running average and estimate (using shared list)
-            # Note: This simple average might fluctuate more with parallel execution
-            if student_times:
-                avg_time = sum(student_times) / len(student_times)
-                # Remaining is based on total completed
-                remaining_students = len(students) - len(student_times)
-                # Adjust estimate based on concurrency
-                est_remaining = (remaining_students * avg_time) / concurrency_limit
-                
-                desc = f"[cyan]Processing: {student['name']}[/cyan]\n[dim]  Avg: {avg_time:.1f}s/student"
-                if est_remaining >= 60:
-                    desc += f" • Est: {est_remaining/60:.0f}m {est_remaining%60:.0f}s remaining"
-                else:
-                    desc += f" • Est: {est_remaining:.0f}s remaining"
-                desc += f" • [yellow]{concurrency_limit}x Parallel[/yellow][/dim]"
-            else:
-                desc = f"[cyan]Processing: {student['name']}[/cyan]"
+            # Copy images from templates to output
+            template_images = Path(f"templates/quiz{quiz_id}/images")
+            output_images = Path(f"{base_dir}/html/images")
             
-            progress.update(task_id, description=desc)
-            
-            student_pdf_count = 0
-            for group in config['question_groups']:
-                group_id = group['id']
-                group_name = group['name']
-                
-                # Generate HTML for this student + question
-                page_break_mode = group.get('page_break', 'same-page')
-                num_parts = group.get('num_parts')
-                html = generate_student_html(
-                    templates[group_id],
-                    student,
-                    group_id,
-                    page_break_mode=page_break_mode,
-                    num_parts=num_parts
-                )
-                
-                # Create output paths
-                safe_name = sanitize_filename(student['name'])
-                variant = student[group_id]['variant']
-                    
-                base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
-                html_dir = f"{base_dir}/html"
-                pdf_dir = f"{base_dir}/pdf"
-                
-                variant_filename = f"{group_id}v{variant}_nf_{safe_name}"
-                html_path = f"{html_dir}/{variant_filename}.html"
-                pdf_path = f"{pdf_dir}/{variant_filename}.pdf"
-                
-                # Save HTML file
-                Path(html_dir).mkdir(parents=True, exist_ok=True)
-                with open(html_path, 'w', encoding='utf-8') as f:
-                    f.write(html)
-                
-                # Render to PDF
-                success = await generate_pdf(html, pdf_path, html_path)
-                
-                if success:
-                    student_pdf_count += 1
-            
-            # Track timing
-            student_elapsed = time.time() - student_start
-            student_times.append(student_elapsed)
-            
-            # Update progress
-            progress.update(task_id, advance=1)
-            return student_pdf_count
-
-    with Live(progress, console=console, refresh_per_second=4):
-        task_id = progress.add_task(
-            "[cyan]Processing students...",
-            total=len(students)
+            if template_images.exists():
+                if output_images.exists():
+                    shutil.rmtree(output_images)
+                shutil.copytree(template_images, output_images)
+                console.print(f"   [green]✓[/green] Copied images to {base_dir}/html/images/")
+        
+        # Step 3: Generate PDFs for each student with progress bar
+        total_pdfs = len(students) * len(config['question_groups'])
+        console.print(f"\n[cyan]📄 Generating {total_pdfs} PDFs[/cyan] [dim]({len(students)} students × {len(config['question_groups'])} questions)[/dim]")
+        
+        pdf_count = 0
+        student_times = []
+        import time
+        overall_start = time.time()
+        
+        # Split progress into two parts for cleaner UI
+        # 1. Worker status (minimal: spinner + text)
+        worker_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            console=console
         )
         
-        # Create tasks for all students
-        tasks = [
-            process_student(i, student, task_id) 
-            for i, student in enumerate(students, 1)
-        ]
+        # 2. Overall progress (detailed: bar, time, counts)
+        overall_progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("•"),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console
+        )
         
-        # Run all tasks (concurrency limited by semaphore)
-        results = await asyncio.gather(*tasks)
-        pdf_count = sum(results)
+        # Group them: Workers first, then Overall at bottom
+        progress_group = Group(
+            worker_progress,
+            overall_progress
+        )
+        
+        # Track generated PDFs for merging: group_id -> list of paths (in order)
+        generated_pdfs = {g['id']: [None] * len(students) for g in config['question_groups']}
+        
+        # Queue for students
+        student_queue = asyncio.Queue()
+        for i, student in enumerate(students, 1):
+            student_queue.put_nowait((i, student))
+            
+        async def worker(worker_id: int, worker_task_id):
+            nonlocal pdf_count
+            while not student_queue.empty():
+                try:
+                    student_idx, student = student_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                
+                # Update worker status
+                worker_progress.update(worker_task_id, description=f"[cyan]Worker {worker_id}:[/cyan] Processing {student['name']}")
+                
+                student_start = time.time()
+                student_pdf_count = 0
+                
+                for group in config['question_groups']:
+                    group_id = group['id']
+                    group_name = group['name']
+                    
+                    # Generate HTML for this student + question
+                    page_break_mode = group.get('page_break', 'same-page')
+                    num_parts = group.get('num_parts')
+                    html = generate_student_html(
+                        templates[group_id],
+                        student,
+                        group_id,
+                        page_break_mode=page_break_mode,
+                        num_parts=num_parts
+                    )
+                    
+                    # Create output paths
+                    safe_name = sanitize_filename(student['name'])
+                    variant = student[group_id]['variant']
+                        
+                    base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
+                    html_dir = f"{base_dir}/html"
+                    pdf_dir = f"{base_dir}/pdf"
+                    
+                    variant_filename = f"{group_id}v{variant:02d}_nf_{safe_name}"
+                    html_path = f"{html_dir}/{variant_filename}.html"
+                    pdf_path = f"{pdf_dir}/{variant_filename}.pdf"
+                    
+                    # Save HTML file
+                    Path(html_dir).mkdir(parents=True, exist_ok=True)
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(html)
+                    
+                    # Render to PDF
+                    success = await generate_pdf(html, pdf_path, html_path)
+                    
+                    if success:
+                        student_pdf_count += 1
+                        # Store path for merging (using index to preserve order)
+                        generated_pdfs[group_id][student_idx - 1] = str(pdf_path)
+                
+                # Track timing
+                student_elapsed = time.time() - student_start
+                student_times.append(student_elapsed)
+                
+                # Update totals
+                pdf_count += student_pdf_count
+                overall_progress.advance(main_task_id)
+                student_queue.task_done()
+                
+                # Reset worker status
+                worker_progress.update(worker_task_id, description=f"[dim]Worker {worker_id}: Idle[/dim]")
+
+        with Live(progress_group, console=console, refresh_per_second=10):
+            main_task_id = overall_progress.add_task(
+                "[bold cyan]Overall Progress[/bold cyan]", 
+                total=len(students)
+            )
+            
+            # Create worker tasks
+            worker_tasks = []
+            for i in range(jobs):
+                worker_task_id = worker_progress.add_task(f"[dim]Worker {i+1}: Idle[/dim]", total=None)
+                worker_tasks.append(asyncio.create_task(worker(i+1, worker_task_id)))
+            
+            await asyncio.gather(*worker_tasks)
     
     # Summary with timing statistics
     console.print()
-    total_time = time.time() - overall_start
-    avg_time = sum(student_times) / len(student_times) if student_times else 0
-    min_time = min(student_times) if student_times else 0
-    max_time = max(student_times) if student_times else 0
-    
-    summary_text = f"""[bold cyan]Summary:[/bold cyan]
-  PDFs generated: [green]{pdf_count}[/green]/[cyan]{total_pdfs}[/cyan]
-  Output directory: [yellow]output/quiz{quiz_id}/[/yellow]
-  
-  [bold cyan]Timing:[/bold cyan]
-  Total: [green]{total_time:.1f}s[/green] ({total_time/60:.1f}m)
-  Avg per student: [green]{avg_time:.1f}s[/green]
-  Range: [green]{min_time:.1f}s[/green] - [yellow]{max_time:.1f}s[/yellow]"""
+    if not merge_only:
+        total_time = time.time() - overall_start
+        avg_time = sum(student_times) / len(student_times) if student_times else 0
+        min_time = min(student_times) if student_times else 0
+        max_time = max(student_times) if student_times else 0
+        
+        summary_text = f"""[bold cyan]Summary:[/bold cyan]
+      PDFs generated: [green]{pdf_count}[/green]/[cyan]{total_pdfs}[/cyan]
+      Output directory: [yellow]output/quiz{quiz_id}/[/yellow]
+      
+      [bold cyan]Timing:[/bold cyan]
+      Total: [green]{total_time:.1f}s[/green] ({total_time/60:.1f}m)
+      Avg per student: [green]{avg_time:.1f}s[/green]
+      Range: [green]{min_time:.1f}s[/green] - [yellow]{max_time:.1f}s[/yellow]"""
 
-    for i, group in enumerate(config['question_groups']):
-        prefix = "└──" if i == len(config['question_groups']) - 1 else "├──"
-        group_dir = f"{group['id']}_{group['name'].lower().replace(' ', '_')}"
-        summary_text += f"\n  [dim]{prefix} {group_dir}/[/dim]"
-        summary_text += f"\n  [dim]    ├── html/ ({len(students)} files)[/dim]"
-        summary_text += f"\n  [dim]    └── pdf/ ({len(students)} files)[/dim]"
+        for i, group in enumerate(config['question_groups']):
+            prefix = "└──" if i == len(config['question_groups']) - 1 else "├──"
+            group_dir = f"{group['id']}_{group['name'].lower().replace(' ', '_')}"
+            summary_text += f"\n  [dim]{prefix} {group_dir}/[/dim]"
+            summary_text += f"\n  [dim]    ├── html/ ({len(students)} files)[/dim]"
+            summary_text += f"\n  [dim]    └── pdf/ ({len(students)} files)[/dim]"
+        
+        console.print(Panel(summary_text, border_style="green", padding=(1, 2)))
     
-    console.print(Panel(summary_text, border_style="green", padding=(1, 2)))
-    
+    # Step 4: Merge PDFs
+    if not skip_merge:
+        console.print(f"\n[cyan]📑 Merging PDFs...[/cyan]")
+        for group in config['question_groups']:
+            group_id = group['id']
+            group_name = group['name']
+            base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
+            
+            pdf_list = []
+            if merge_only:
+                # Scan directory for PDFs
+                pdf_dir = Path(f"{base_dir}/pdf")
+                if pdf_dir.exists():
+                    # Find all PDFs except the merged one
+                    pdf_list = sorted([
+                        str(p) for p in pdf_dir.glob("*.pdf") 
+                        if not p.name.endswith("_merged.pdf")
+                    ])
+            else:
+                # Use tracked PDFs from generation
+                # Filter out None values and SORT by filename (to group variants together)
+                pdf_list = sorted([p for p in generated_pdfs[group_id] if p is not None])
+            
+            if pdf_list:
+                merged_path = f"{base_dir}/{group_id}_merged.pdf"
+                if merge_pdfs(pdf_list, merged_path):
+                    console.print(f"   [green]✓[/green] Merged {len(pdf_list)} PDFs to {merged_path}")
+            else:
+                console.print(f"   [yellow]⚠[/yellow] No PDFs to merge for {group_id}")
+    else:
+        console.print(f"\n[dim]⏭ Skipping PDF merge (--no-merge)[/dim]")
+
     # Create zip file automatically (unless skipped)
     if not skip_zip:
         console.print(f"\n[cyan]📦 Creating zip file...[/cyan]")

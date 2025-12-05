@@ -100,12 +100,24 @@ Examples:
         action='store_true',
         help='Force regenerate HTML templates from rubric'
     )
+
+    parser.add_argument(
+        '--no-merge',
+        action='store_true',
+        help='Skip merging all student PDFs into one big file'
+    )
+
+    parser.add_argument(
+        '--merge-only',
+        action='store_true',
+        help='Skip generation and only merge existing PDFs'
+    )
     
     parser.add_argument(
         '--jobs',
         type=int,
         default=2,
-        help='Number of parallel jobs (1-4, default: 2)'
+        help='Number of parallel jobs (1-10, default: 2)'
     )
     
     args = parser.parse_args()
@@ -114,13 +126,13 @@ Examples:
         print("❌ Cannot combine --templates-only and --no-templates")
         sys.exit(1)
 
-    if args.jobs < 1 or args.jobs > 4:
-        print("❌ --jobs must be between 1 and 4")
+    if args.jobs < 1 or args.jobs > 10:
+        print("❌ --jobs must be between 1 and 10")
         sys.exit(1)
     
-    if not args.templates_only:
+    if not args.templates_only and not args.merge_only:
         if not args.csv:
-            print("❌ --csv is required unless --templates-only is set")
+            print("❌ --csv is required unless --templates-only or --merge-only is set")
             sys.exit(1)
         if not Path(args.csv).exists():
             print(f"❌ Error: CSV file not found: {args.csv}")
@@ -153,7 +165,9 @@ Examples:
             force_regenerate=args.regenerate,
             templates_only=args.templates_only,
             generate_templates=not args.no_templates,
-            jobs=args.jobs
+            jobs=args.jobs,
+            skip_merge=args.no_merge,
+            merge_only=args.merge_only
         ))
     except KeyboardInterrupt:
         print("\n\n⚠ Interrupted by user")
