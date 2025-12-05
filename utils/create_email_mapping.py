@@ -35,7 +35,7 @@ def create_mapping(grades_csv: str, output_path: str):
         mapping = {}
         for _, row in valid_students.iterrows():
             sis_id = str(row['SIS User ID']).strip()
-            email = str(row['SIS Login ID']).strip()
+            email = str(row['SIS Login ID']).strip().lower()
             
             # Simple validation
             if sis_id and email:
