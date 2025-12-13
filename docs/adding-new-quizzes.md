@@ -376,7 +376,29 @@ mkdir -p templates/quizN/images
 cp rubrics/quizN/images/*.png templates/quizN/images/
 ```
 
-### Step 7: Test
+### Step 7: Set Up Email Mapping (Optional but Recommended)
+
+For student emails to appear on PDFs, you need a mapping file. This is typically auto-generated, but you can set it up manually:
+
+**Automatic (Recommended):**
+- Place a Canvas Grades CSV in `test_data/` (e.g., `2024-12-01T1234_Grades-CS_577.csv`)
+- The system will auto-detect and generate `configs/student_emails.json` on first run
+
+**Manual:**
+```bash
+# Generate from a specific Grades CSV
+python utils/create_email_mapping.py "test_data/Grades-CS_577.csv" -o configs/student_emails.json
+```
+
+**Verify mapping exists:**
+```bash
+cat configs/student_emails.json | head -5
+# Should show: {"UW108U211": "student@wisc.edu", ...}
+```
+
+**Note:** If no email mapping exists, PDFs will still generate but without email addresses in the header. The CLI will show a warning.
+
+### Step 8: Test
 
 ```bash
 # Test parsing only
@@ -394,13 +416,14 @@ for s in students:
 python3 run_quiz.py --quiz N --csv "path/to/quiz.csv" --limit 3 --no-zip
 ```
 
-### Step 8: Verify Output
+### Step 9: Verify Output
 
 Check generated PDFs:
 - Correct variant shown for each student?
 - All parts (A, B, C) have correct student answers?
 - Images rendering properly?
 - Page breaks in right places?
+- Student emails showing in header? (if email mapping configured)
 
 ---
 

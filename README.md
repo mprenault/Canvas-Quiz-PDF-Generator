@@ -179,6 +179,39 @@ python run_quiz.py --quiz 5 --csv "Quiz 5.csv" --jobs 3
 - Run `python run_quiz.py --quiz 5 --templates-only` to regenerate only the templates (no CSV required).
 - Add `--no-templates` to skip the extra blank-template pass when you only want student PDFs.
 
+### Email Mapping
+
+Student emails are automatically added to PDF headers for easy identification during grading. The system maps SIS User IDs to emails using a Canvas Grades export.
+
+**How It Works:**
+1. **Auto-Discovery**: When you run `run_quiz.py`, it checks for `configs/student_emails.json`
+2. **Auto-Generation**: If missing, it searches `test_data/` for a Grades CSV file (which contains emails) and generates the mapping automatically
+3. **Injection**: During PDF generation, emails are looked up by SIS ID and added to each student's PDF header
+
+**Manual Email Mapping:**
+
+If automatic generation fails or you want to specify a different source:
+
+```bash
+# Generate email mapping from a specific Grades CSV
+python utils/create_email_mapping.py "test_data/2024-12-01T1234_Grades-CS_577.csv"
+
+# Specify custom output location
+python utils/create_email_mapping.py "path/to/grades.csv" --output configs/student_emails.json
+```
+
+**Required Grades CSV Columns:**
+- `SIS User ID` - The student ID (e.g., "UW108U211")
+- `SIS Login ID` - The student email (e.g., "student@wisc.edu")
+
+**Output:**
+- Generates `student_emails.json` with format: `{"SIS_ID": "email@wisc.edu", ...}`
+- If placed in `configs/student_emails.json`, it will be auto-loaded on future runs
+
+**Without Email Mapping:**
+- PDFs will still generate, but the "Email:" field will be omitted
+- CLI will show a warning that emails are missing
+
 ## Adding a New Quiz (Quiz 1, Quiz 6, etc.)
 
 ### Step 1: Gather Materials
