@@ -27,18 +27,22 @@ QUIZ_CONFIG = {
             #     2: 'graph2.jpg',
             #     # ... map each version to its image file
             # }
-            'page_break': 'same-page'
+            'page_break': 'same-page',
+            # Optional: expected number of pages per student PDF.
+            # Any PDF exceeding this count is auto-moved to a separate
+            # *_overflow_merged.pdf instead of the main merged PDF.
+            # 'expected_pages': 2,
         },
         {
-            'id': 'q2', 
+            'id': 'q2',
             'name': 'Bipartite Matching',
             'variant_tags': ['2.1', '2.2', '2.3', '2.4', '2.5'],  # CUSTOMIZE
             'num_parts': 3,  # Number of subparts
             'latex_line_range': (703, 1202),
             'num_versions': 5,
-            'points': 6
-            ,
-            'page_break': 'each-part'
+            'points': 6,
+            'page_break': 'each-part',
+            # 'expected_pages': 4,
         }
     ]
 }

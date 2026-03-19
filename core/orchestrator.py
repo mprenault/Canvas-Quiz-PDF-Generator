@@ -11,7 +11,7 @@ Coordinates:
 import asyncio
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
@@ -29,6 +29,69 @@ from .zip_creator import create_quiz_zip
 from .pdf_merger import merge_pdfs
 
 console = Console()
+
+
+def _split_pdfs_for_merge(
+    pdf_list: List[str],
+    exclude_students: Optional[List[str]],
+    expected_pages: Optional[int],
+) -> Tuple[List[str], List[str], List[str], List[str]]:
+    """
+    Partition a list of per-student PDF paths into a main list and an overflow list.
+
+    A PDF lands in overflow when either:
+      - its filename matches an explicitly excluded student name, or
+      - its page count exceeds expected_pages (Option 2 auto-detection).
+
+    Args:
+        pdf_list: Sorted list of PDF file paths to examine.
+        exclude_students: Raw student names to exclude (partial, case-insensitive).
+        expected_pages: Maximum allowed pages per PDF (None = skip check).
+
+    Returns:
+        (main_list, overflow_list, excluded_by_name, overflow_by_pages)
+    """
+    from pypdf import PdfReader
+
+    main_list: List[str] = []
+    overflow_list: List[str] = []
+    excluded_by_name: List[str] = []
+    overflow_by_pages: List[str] = []
+
+    for pdf_path in pdf_list:
+        filename = Path(pdf_path).name
+
+        # --- explicit name exclusion ---
+        matched_name: Optional[str] = None
+        if exclude_students:
+            for raw_name in exclude_students:
+                safe = sanitize_filename(raw_name)
+                # Case-insensitive partial match against the sanitized name segment
+                if f"_nf_{safe}".lower() in filename.lower():
+                    matched_name = raw_name
+                    break
+
+        if matched_name:
+            overflow_list.append(pdf_path)
+            excluded_by_name.append(f"{filename} (excluded: '{matched_name}')")
+            continue
+
+        # --- page-count overflow detection ---
+        if expected_pages is not None:
+            try:
+                page_count = len(PdfReader(pdf_path).pages)
+                if page_count > expected_pages:
+                    overflow_list.append(pdf_path)
+                    overflow_by_pages.append(
+                        f"{filename} ({page_count} pages, expected ≤{expected_pages})"
+                    )
+                    continue
+            except Exception:
+                pass  # unreadable PDF stays in main list
+
+        main_list.append(pdf_path)
+
+    return main_list, overflow_list, excluded_by_name, overflow_by_pages
 
 
 def load_or_generate_templates(config: dict, force_regenerate: bool = False) -> Dict[str, str]:
@@ -133,11 +196,12 @@ async def process_quiz(
     jobs: int = 2,
     skip_merge: bool = False,
     merge_only: bool = False,
-    email_mapping: Optional[Dict[str, str]] = None
+    email_mapping: Optional[Dict[str, str]] = None,
+    exclude_students: Optional[List[str]] = None,
 ) -> None:
     """
     Main workflow: CSV → HTML → PDFs
-    
+
     Args:
         csv_path: Path to Canvas CSV export (optional when templates_only)
         config: Quiz configuration dict
@@ -148,11 +212,13 @@ async def process_quiz(
         force_regenerate: Force regeneration of templates
         templates_only: If True, only produce blank templates
         generate_templates: If False, skip blank template generation
-        generate_templates: If False, skip blank template generation
         jobs: Number of parallel jobs (default: 2)
         skip_merge: If True, skip merging PDFs
         merge_only: If True, skip generation and only merge existing PDFs
         email_mapping: Optional dict mapping SIS User ID -> Email
+        exclude_students: Student names to exclude from the main merged PDF.
+            Excluded students are placed in a separate overflow PDF instead.
+            Supports partial, case-insensitive matching against sanitized filenames.
     """
     quiz_id = config['quiz_id']
     quiz_name = config['quiz_name']
@@ -398,28 +464,51 @@ async def process_quiz(
             group_id = group['id']
             group_name = group['name']
             base_dir = f"output/quiz{quiz_id}/{group_id}_{group_name.lower().replace(' ', '_')}"
-            
+            expected_pages: Optional[int] = group.get('expected_pages')
+
             pdf_list = []
             if merge_only:
-                # Scan directory for PDFs
                 pdf_dir = Path(f"{base_dir}/pdf")
                 if pdf_dir.exists():
-                    # Find all PDFs except the merged one
                     pdf_list = sorted([
-                        str(p) for p in pdf_dir.glob("*.pdf") 
+                        str(p) for p in pdf_dir.glob("*.pdf")
                         if not p.name.endswith("_merged.pdf")
+                        and not p.name.endswith("_overflow_merged.pdf")
                     ])
             else:
-                # Use tracked PDFs from generation
-                # Filter out None values and SORT by filename (to group variants together)
                 pdf_list = sorted([p for p in generated_pdfs[group_id] if p is not None])
-            
-            if pdf_list:
-                merged_path = f"{base_dir}/{group_id}_merged.pdf"
-                if merge_pdfs(pdf_list, merged_path):
-                    console.print(f"   [green]✓[/green] Merged {len(pdf_list)} PDFs to {merged_path}")
-            else:
+
+            if not pdf_list:
                 console.print(f"   [yellow]⚠[/yellow] No PDFs to merge for {group_id}")
+                continue
+
+            main_list, overflow_list, excluded_by_name, overflow_by_pages = _split_pdfs_for_merge(
+                pdf_list, exclude_students, expected_pages
+            )
+
+            # Report exclusions / overflows before merging
+            for label in excluded_by_name:
+                console.print(f"   [yellow]⚠[/yellow] Excluded (name match): {label}")
+            for label in overflow_by_pages:
+                console.print(f"   [yellow]⚠[/yellow] Overflow (page count): {label}")
+
+            # Main merged PDF
+            if main_list:
+                merged_path = f"{base_dir}/{group_id}_merged.pdf"
+                if merge_pdfs(main_list, merged_path):
+                    console.print(
+                        f"   [green]✓[/green] Merged {len(main_list)} PDFs → {merged_path}"
+                    )
+            else:
+                console.print(f"   [yellow]⚠[/yellow] No PDFs in main list for {group_id} after filtering")
+
+            # Overflow merged PDF (excluded + page-count violators)
+            if overflow_list:
+                overflow_path = f"{base_dir}/{group_id}_overflow_merged.pdf"
+                if merge_pdfs(overflow_list, overflow_path):
+                    console.print(
+                        f"   [cyan]📎[/cyan] Overflow PDF ({len(overflow_list)} student(s)) → {overflow_path}"
+                    )
     else:
         console.print(f"\n[dim]⏭ Skipping PDF merge (--no-merge)[/dim]")
 

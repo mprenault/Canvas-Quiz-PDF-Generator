@@ -112,6 +112,15 @@ Examples:
         action='store_true',
         help='Skip generation and only merge existing PDFs'
     )
+
+    parser.add_argument(
+        '--exclude-student',
+        action='append',
+        metavar='NAME',
+        dest='exclude_students',
+        help='Exclude a student from the merged PDF (by name, case-insensitive partial match). '
+             'Can be specified multiple times. Excluded students go into a separate overflow PDF.'
+    )
     
     parser.add_argument(
         '--jobs',
@@ -221,7 +230,8 @@ Examples:
             jobs=args.jobs,
             skip_merge=args.no_merge,
             merge_only=args.merge_only,
-            email_mapping=email_mapping
+            email_mapping=email_mapping,
+            exclude_students=args.exclude_students,
         ))
     except KeyboardInterrupt:
         print("\n\n⚠ Interrupted by user")
