@@ -370,13 +370,13 @@ async def process_quiz(
                     group_name = group['name']
                     
                     # Generate HTML for this student + question
-                    page_break_mode = group.get('page_break', 'same-page')
+                    #page_break_mode = group.get('page_break', 'same-page')
                     num_parts = group.get('num_parts')
                     html = generate_student_html(
                         templates[group_id],
                         student,
                         group_id,
-                        page_break_mode=page_break_mode,
+                        #page_break_mode=page_break_mode,
                         num_parts=num_parts
                     )
                     
@@ -398,7 +398,7 @@ async def process_quiz(
                         f.write(html)
                     
                     # Render to PDF
-                    success = await generate_pdf(html, pdf_path, html_path)
+                    success = await generate_pdf(html, pdf_path, html_path, group['expected_pages'])
                     
                     if success:
                         student_pdf_count += 1

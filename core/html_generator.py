@@ -86,7 +86,7 @@ def insert_student_answers(html: str, answers: Dict[str, str], num_parts: int = 
     Returns:
         HTML with answers inserted
     """
-    part_letters = ['a', 'b', 'c', 'd', 'e', 'f']
+    part_letters = [chr(i) for i in range(ord('a'), ord('z') + 1)]
     
     # Determine which parts to process
     if num_parts is not None:
@@ -119,7 +119,7 @@ def generate_student_html(
     template_html: str,
     student_data: Dict,
     group_id: str,
-    page_break_mode: str = 'same-page',
+#    page_break_mode: str = 'same-page',
     num_parts: int = None
 ) -> str:
     """
@@ -129,7 +129,7 @@ def generate_student_html(
         template_html: Full HTML template (all variants)
         student_data: Student dict with variant and answers
         group_id: Question group ID (e.g., 'q1')
-        page_break_mode: Page break configuration ('same-page' or 'each-part')
+        #page_break_mode: Page break configuration ('same-page' or 'each-part')
         num_parts: Number of parts expected (e.g., 2 for Q1, 3 for Q2)
         
     Returns:

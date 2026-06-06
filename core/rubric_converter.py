@@ -1,11 +1,14 @@
 """
 Rubric Converter: Convert LaTeX rubrics to HTML templates.
-
 Assumes:
 - Rubric folder contains .tex file and all image files
   - Images are referenced in LaTeX with \\includegraphics{filename.png}
 - Course staff unzips materials directly into rubrics/quizX/
 """
+
+# ==================== DEBUG FLAG ====================
+DEBUG = True   # ← Set to True for detailed debugging output (including all loops)
+# ====================================================
 
 import subprocess
 import re
@@ -15,123 +18,138 @@ from bs4 import BeautifulSoup
 from typing import Dict, Tuple
 
 
+def debug_print(*args, **kwargs):
+    """Print debug messages only if DEBUG is enabled."""
+    if DEBUG:
+        print("[DEBUG]", *args, **kwargs)
+
+
 def find_rubric_file(rubric_folder: str) -> Path:
-    """
-    Find the main rubric .tex file in the folder.
-    Looks for *_solutions_rubric.tex or *_rubric.tex
-    """
+    """Find the main rubric .tex file in the folder."""
+    debug_print(f"Searching for rubric file in: rubrics/{rubric_folder}")
     folder = Path(f"rubrics/{rubric_folder}")
-    
-    # Try to find solutions rubric first
+   
     candidates = list(folder.glob("*_solutions_rubric.tex"))
+    debug_print(f"  → Solutions rubric candidates: {len(candidates)}")
+    
     if not candidates:
         candidates = list(folder.glob("*_rubric.tex"))
-    
+        debug_print(f"  → Regular rubric candidates: {len(candidates)}")
+   
     if not candidates:
         raise FileNotFoundError(f"No rubric .tex file found in {folder}")
-    
+   
+    debug_print(f"✓ Selected rubric: {candidates[0].name}")
     return candidates[0]
 
 
 def copy_images_to_templates(rubric_folder: str, quiz_id: int) -> None:
-    """
-    Copy all image files from rubrics/quizX/ to templates/quizX/images/
-    """
+    """Copy all image files from rubrics/quizX/ to templates/quizX/images/"""
     source_dir = Path(f"rubrics/{rubric_folder}")
     dest_dir = Path(f"templates/quiz{quiz_id}/images")
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    debug_print(f"Starting image copy: {source_dir} → {dest_dir}")
     
-    # Copy all image files
+    dest_dir.mkdir(parents=True, exist_ok=True)
+   
     image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.svg', '*.gif']
     copied = 0
-    
-    for pattern in image_extensions:
+   
+    debug_print(f"Processing {len(image_extensions)} image extension patterns...")
+    for i, pattern in enumerate(image_extensions, 1):
+        debug_print(f"  [Image Pattern Loop {i}/{len(image_extensions)}] Pattern: {pattern}")
         for img_file in source_dir.glob(pattern):
             dest_file = dest_dir / img_file.name
             shutil.copy2(img_file, dest_file)
+            debug_print(f"    → Copied: {img_file.name} ({img_file.stat().st_size:,} bytes)")
             copied += 1
-    
-    print(f"      ✓ Copied {copied} image files")
+   
+    debug_print(f"Image copy complete. Total files copied: {copied}")
+    print(f" ✓ Copied {copied} image files")
 
 
 def extract_latex_section(tex_file: Path, line_range: Tuple[int, int]) -> str:
     """Extract specific line range from LaTeX file."""
+    debug_print(f"Extracting lines {line_range[0]}-{line_range[1]} from {tex_file.name}")
+    
     with open(tex_file, 'r', encoding='utf-8') as f:
         lines = f.readlines()
-    
+   
     start, end = line_range
-    return ''.join(lines[start-1:end])
+    content = ''.join(lines[start-1:end])
+    debug_print(f"  → Extracted {len(content):,} characters ({end - start + 1} lines)")
+    return content
 
 
 def replace_tikz_with_images(latex_content: str, image_map: dict) -> str:
-    """
-    Replace TikZ code with \includegraphics based on version mapping.
-    
-    Counts tikzpicture environments sequentially and replaces each with
-    the corresponding image from image_map.
-    
-    Pattern matches:
-    \begin{figure}[H]
-      \begin{tikzpicture}...\end{tikzpicture}
-      \centering
-    \end{figure}
-    """
+    """Replace TikZ code with includegraphics based on version mapping."""
     if not image_map:
+        debug_print("No image_map provided, skipping TikZ replacement")
         return latex_content
+   
+    debug_print(f"Starting TikZ replacement with map: {list(image_map.keys())}")
     
-    # Match entire figure environment with tikzpicture (handles both orders)
-    # Pattern: figure[H] ... tikzpicture ... end{tikzpicture} ... centering ... end{figure}
     tikz_pattern = r'\\begin\{figure\}\[H\].*?\\begin\{tikzpicture\}.*?\\end\{tikzpicture\}.*?\\end\{figure\}'
-    
     version_num = 1
-    
+
     def replace_with_image(match):
         nonlocal version_num
+        debug_print(f"  [TikZ Replace Loop] Processing figure #{version_num}")
         if version_num in image_map:
             img_file = image_map[version_num]
+            debug_print(f"    → Replacing with: {img_file}")
             replacement = f'\\begin{{figure}}[H]\n\\centering\n\\includegraphics[width=0.8\\textwidth]{{{img_file}}}\n\\end{{figure}}'
             version_num += 1
             return replacement
         else:
+            debug_print(f"    → No mapping for version {version_num}, keeping original")
             version_num += 1
-            return match.group(0)  # Keep original if no mapping
-    
-    return re.sub(tikz_pattern, replace_with_image, latex_content, flags=re.DOTALL)
+            return match.group(0)
+
+    result = re.sub(tikz_pattern, replace_with_image, latex_content, flags=re.DOTALL)
+    debug_print(f"TikZ replacement complete. Processed {version_num-1} figures.")
+    return result
 
 
 def preprocess_exam_latex(latex_content: str, image_map: dict = None) -> str:
-    """
-    Convert exam class environments to standard LaTeX for Pandoc.
-    """
-    # Replace TikZ with images if mapping provided
+    """Convert exam class environments to standard LaTeX for Pandoc."""
+    debug_print("Starting LaTeX preprocessing...")
+    
     if image_map:
         latex_content = replace_tikz_with_images(latex_content, image_map)
-    
-    # Remove questions/parts environment markers
-    latex_content = latex_content.replace(r'\begin{questions}', '')
-    latex_content = latex_content.replace(r'\end{questions}', '')
-    latex_content = latex_content.replace(r'\begin{parts}', '')
-    latex_content = latex_content.replace(r'\end{parts}', '')
-    
-    # Convert \question[points] to section
+   
+    # Remove environment markers
+    for env in ['questions', 'parts']:
+        before = len(latex_content)
+        latex_content = latex_content.replace(f'\\begin{{{env}}}', '')
+        latex_content = latex_content.replace(f'\\end{{{env}}}', '')
+        debug_print(f"  Removed \\{env} environments | chars removed: {before - len(latex_content)}")
+   
+    # Convert question and part commands
     latex_content = re.sub(
         r'\\question\[(\d+)\]',
-        r'\\section*{Question (\1 points)}',
+        r'\\section*{Question}',
         latex_content
     )
-    
-    # Convert \part[points] to subsection
+    latex_content = re.sub(
+        r'\\question',
+        r'\\section*{Question}',
+        latex_content
+    )
     latex_content = re.sub(
         r'\\part\[(\d+)\]\s*',
-        r'\\subsection*{Part (\1 points)}',
+        r'\\subsection*{Part}',
         latex_content
     )
-    
-    # Convert solutionbox to blockquote
-    # Handle: \begin{solutionbox}{\stretch{N}} or \begin{solutionbox}{\stretch{0.4}}\\
-    # Matches integers or decimals in \stretch{}
     latex_content = re.sub(
-        r'\\begin\{solutionbox\}\{\\stretch\{[\d.]+\}\}(\\\\)?',
+        r'\\part\s*',
+        r'\\subsection*{Part}',
+        latex_content
+    )
+
+   
+    # Convert solutionbox
+    latex_content = re.sub(
+        r'\\begin\{solutionbox\}\{.*\}+',
         r'\\begin{quote}\\textbf{Solution:}',
         latex_content
     )
@@ -140,15 +158,52 @@ def preprocess_exam_latex(latex_content: str, image_map: dict = None) -> str:
         r'\\end{quote}',
         latex_content
     )
-    
+
+    # Convert choices
+    latex_content = re.sub(
+        r'\\begin\{choices\}',
+        r'\\begin{enumerate}',
+        latex_content
+    )
+    latex_content = re.sub(
+        r'\\begin\{oneparchoices\}',
+        r'\\begin{enumerate}',
+        latex_content
+    )    
+    latex_content = re.sub(
+        r'\\end\{choices\}',
+        r'\\end{enumerate}\\begin{quote}\\end{quote}',
+        latex_content
+    )
+    latex_content = re.sub(
+        r'\\end\{itemize\}',
+        r'\\end{itemize}\\begin{quote}\\end{quote}',
+        latex_content
+    )
+    latex_content = re.sub(
+        r'\\end\{oneparchoices\}',
+        r'\\end{enumerate}\\begin{quote}\\end{quote}',
+        latex_content
+    )
+    latex_content = re.sub(
+        r'\\CorrectChoice(.*)',
+        r'\\item CORRECT: \1',
+        latex_content
+    )
+    latex_content = re.sub(
+        r'\\choice(.*)',
+        r'\\item\1',
+        latex_content
+    )
+   
+    debug_print("Preprocessing completed")
     return latex_content
 
 
 def latex_to_html_pandoc(latex_content: str, group_id: str) -> str:
-    """
-    Convert LaTeX to HTML using Pandoc.
-    """
-    # Create full document
+    """Convert LaTeX to HTML using Pandoc."""
+    debug_print(f"Starting Pandoc conversion for group: {group_id}")
+    
     full_latex = f"""\\documentclass{{article}}
 \\usepackage{{amsmath}}
 \\usepackage{{amsfonts}}
@@ -158,38 +213,41 @@ def latex_to_html_pandoc(latex_content: str, group_id: str) -> str:
 {latex_content}
 \\end{{document}}
 """
-    
+   
     temp_tex = Path(f"temp_{group_id}.tex")
     temp_html = Path(f"temp_{group_id}.html")
-    
+   
     try:
         with open(temp_tex, 'w', encoding='utf-8') as f:
             f.write(full_latex)
-        
-        # Run Pandoc
+        debug_print(f"  Created temporary TeX file: {temp_tex}")
+       
         result = subprocess.run([
             'pandoc',
             str(temp_tex),
             '-o', str(temp_html),
             '--standalone',
-            '--mathjax',
+#            '--mathjax=https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js', 
+            '--mathml',  #MathML doesn't add the polyfill.ip
             '--from=latex',
             '--to=html5',
             '--css=https://cdn.jsdelivr.net/npm/water.css@2/out/water.css'
         ], capture_output=True, text=True)
-        
+       
         if result.returncode != 0:
-            print(f"      ⚠ Pandoc error:\n{result.stderr[:500]}")
-            # Save temp file for debugging
+            debug_print("Pandoc conversion FAILED")
+            debug_print(f"  Error output: {result.stderr.strip()[:1000]}")
             debug_file = Path(f"debug_{group_id}.tex")
             shutil.copy2(temp_tex, debug_file)
-            print(f"      Saved debug file: {debug_file}")
+            print(f" Saved debug file: {debug_file}")
             raise RuntimeError(f"Pandoc failed - check {debug_file}")
-        
-        # Read result
+       
         with open(temp_html, 'r', encoding='utf-8') as f:
-            return f.read()
+            html = f.read()
         
+        debug_print(f"  Pandoc successful. Output size: {len(html):,} characters")
+        return html
+       
     finally:
         if temp_tex.exists():
             temp_tex.unlink()
@@ -198,289 +256,200 @@ def latex_to_html_pandoc(latex_content: str, group_id: str) -> str:
 
 
 def fix_image_paths(html: str) -> str:
-    """
-    Update image src paths to point to images/ subdirectory.
-    Changes: <img src="Q4.png"> → <img src="images/Q4.png">
-    """
+    """Update image src paths to point to images/ subdirectory."""
+    debug_print("Starting image path fixing loop...")
     soup = BeautifulSoup(html, 'html.parser')
+    images = soup.find_all('img')
+    debug_print(f"  Found {len(images)} images")
     
-    for img in soup.find_all('img'):
+    updated = 0
+    for i, img in enumerate(images, 1):
         src = img.get('src', '')
-        if src and not src.startswith(('http://', 'https://', 'images/', '/')):
-            img['src'] = f"images/{src}"
+        debug_print(f"  [Image Path Loop {i}/{len(images)}] src='{src}'")
+        if src and not src.startswith(('http://', 'https://', 'images/')):
+            old_src = src
+            last_slash = src.rfind('/')
+            filename = src[last_slash + 1:] if last_slash != -1 else src
+            img['src'] = f"images/{filename}"
             img['class'] = img.get('class', []) + ['rubric-image']
+            debug_print(f"    → Updated: '{old_src}' → 'images/{filename}'")
+            updated += 1
+        else:
+            debug_print(f"    → Skipped (path already correct)")
     
+    debug_print(f"Image path fixing complete. Updated {updated} images.")
     return str(soup)
 
 
 def add_question_structure_and_placeholders(html: str, group: dict) -> str:
-    """
-    Add question version wrappers and answer placeholders.
+    """Add question version wrappers and answer placeholders."""
+    debug_print(f"Starting structure and placeholder addition for group {group['id']}")
     
-    Structure:
-    - Each h1 "Question (X points)" becomes a question-version div
-    - Each h2 "Part (X points)" gets an answer placeholder after its solution
-    """
     soup = BeautifulSoup(html, 'html.parser')
-    
-    # Find all question sections (h1 tags with "Question")
-    # Use get_text() to handle newlines in text
     all_h1s = soup.find_all('h1')
-    sections = [h1 for h1 in all_h1s if re.search(r'Question.*points', h1.get_text(), re.DOTALL)]
+    sections = [h1 for h1 in all_h1s if re.search(r'Question', h1.get_text())]
     
-    # Process sections in reverse order to avoid DOM mutation issues
+    debug_print(f"  Found {len(sections)} question sections")
+    
+    # Process sections in reverse order
     for version_num in range(len(sections), 0, -1):
-        section = sections[version_num - 1]
+        idx = version_num - 1
+        section = sections[idx]
+        debug_print(f"  [Question Version Loop] Processing version {version_num} (index {idx})")
+
         
-        # Create wrapper for this question version
         wrapper = soup.new_tag('div', **{
             'class': 'question-version',
             'data-version': str(version_num),
             'data-group': group['id']
         })
         
-        # Collect all elements until next question or end
+        # Collect elements to wrap
         elements_to_wrap = []
         current = section
-        
         while current:
-            next_elem = current.next_sibling
             elements_to_wrap.append(current)
-            
-            # Stop if next is an h1 question (checking the actual tag, not just name)
-            if next_elem and next_elem.name == 'h1':
-                # Check if it's a question header
-                if next_elem.find(string=re.compile(r'Question')):
-                    break
-            
+            #debug_print(f"Wrapping: {current}")
+            next_elem = current.next_sibling
+            if next_elem and (next_elem.name =='div' or (next_elem.name == 'h1' and re.search(r'Question', next_elem.get_text()))):
+                break
             current = next_elem
         
-        # Save parent and position
-        parent = section.parent
-        insert_position = list(parent.children).index(section) if parent and section in parent.children else 0
+        debug_print(f"    Collected {len(elements_to_wrap)} elements for wrapping")
         
-        # Extract elements and add to wrapper
+        # Wrap elements
+        parent = section.parent
+        insert_position = list(parent.children).index(section) if parent else 0
+        
         for elem in elements_to_wrap:
             if elem.parent:
                 elem.extract()
-        
         for elem in elements_to_wrap:
             wrapper.append(elem)
         
-        # Insert wrapper at original position
         if parent:
             parent.insert(insert_position, wrapper)
+
+        #debug_print(wrapper)
         
-        # Add answer placeholders for each part
-        parts = wrapper.find_all('h2', string=re.compile(r'Part.*points'))
-        part_letters = ['a', 'b', 'c', 'd', 'e', 'f']
+        # Process parts
+        parts = wrapper.find_all('h2', string=re.compile(r'Part'))
+        debug_print(f"    Found {len(parts)} parts in version {version_num}")       
         
-        for part_idx, part_header in enumerate(parts):
-            num_parts = group.get('num_parts', len(parts))
-            
-            if part_idx < num_parts:
-                part_letter = part_letters[part_idx]
+        part_letters = [chr(i) for i in range(ord('a'), ord('z') + 1)]
+
+        if len(parts) == 0:
+            debug_print("    No parts found → adding default Part A")
+            parts = [None]
+
+        for p_idx, part_header in enumerate(parts):
+            debug_print(f"      [Part Loop {p_idx+1}/{len(parts)}] Processing part {p_idx+1}")
+            if p_idx < len(part_letters):
+                part_letter = part_letters[p_idx]
                 
-                # Update part header text to include letter (Part A, Part B, etc.)
-                original_text = part_header.get_text()
-                # Replace "Part" with "Part A", "Part B", etc.
-                new_text = f"Part {part_letter.upper()}" + original_text[4:]  # Keep the " (X points)" part
-                part_header.string = new_text
-                
-                # Add page-break class to header if configured
-                if group.get('page_break') == 'each-part':
-                    # Add page-break to ALL parts (A, B, C) - separates from question intro
-                    existing_class = part_header.get('class', [])
-                    if isinstance(existing_class, str):
-                        existing_class = [existing_class]
-                    existing_class.append('page-break')
-                    part_header['class'] = existing_class
-                
-                # Find the solution blockquote after this part
-                solution_box = part_header.find_next('blockquote')
-                
-                # Create student answer section
+                # Update part header
+                if part_header is not None:
+                    original_text = part_header.get_text()
+                    new_text = f"Part {part_letter.upper()}" + original_text[4:]
+                    part_header.string = new_text
+                    if p_idx > 0 and group['page_break'] == 'each-part-not-first':
+                        part_header['class'].append('pagebreakbefore')
+                    if group['page_break'] == 'each-part':
+                        part_header['class'].append('pagebreakbefore')                        
+                    # Add student answer section
+                    solution_box = part_header.find_next('blockquote')
+                else:
+                    solution_box = wrapper.find('blockquote')
+
+                if solution_box:
+                    target = solution_box
+                    debug_print(f"    → Found solution box for Part {part_letter.upper()}")
+                else:
+                    # No solution box → add at the end of the question wrapper
+                    target = wrapper
+                    debug_print(f"    → No solution box found, adding Part {part_letter.upper()} at end of question")
+                    
                 answer_section = soup.new_tag('div', **{
                     'class': 'student-answer-section',
                     'data-part': part_letter
                 })
                 
-                answer_heading = soup.new_tag('h3')
-                answer_heading.string = f"Student Answer (Part {part_letter.upper()}):"
-                answer_section.append(answer_heading)
+                h3 = soup.new_tag('h3')
+                h3.string = f"Student Answer (Part {part_letter.upper()}):"
+                answer_section.append(h3)
                 
-                answer_placeholder = soup.new_tag('div', **{'class': 'answer-placeholder'})
-                answer_placeholder.string = f"{{{{PART_{part_letter.upper()}}}}}"
-                answer_section.append(answer_placeholder)
+                placeholder = soup.new_tag('div', **{'class': 'answer-placeholder'})
+                placeholder.string = f"{{{{PART_{part_letter.upper()}}}}}"
+                answer_section.append(placeholder)
                 
-                # Insert after solution box
-                if solution_box:
-                    solution_box.insert_after(answer_section)
-        
-        version_num += 1
+                target.insert_after(answer_section)
+                debug_print(f"    → Added student answer section for Part {part_letter.upper()}")
     
-    # Add custom CSS - compact style matching LaTeX rubric
+    # Add CSS
     style_tag = soup.new_tag('style')
     style_tag.string = """
-        @page {
-            margin: 0.75in;
-        }
-        body {
-            font-family: 'Computer Modern', 'Latin Modern', 'Times New Roman', serif;
-            font-size: 11pt;
-            line-height: 1.3;
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-        }
-        .question-version {
-            margin: 0;
-            padding: 0;
-        }
-        .rubric-image {
-            display: block;
-            margin: 0.5em auto;
-            max-width: 400px;
-            max-height: 250px;
-            height: auto;
-        }
-        blockquote {
-            background-color: #f0f0f0;
-            border-left: 3px solid #666;
-            padding: 0.4em 0.8em;
-            margin: 0.5em 0;
-            font-size: 10.5pt;
-        }
-        blockquote strong {
-            color: #000;
-            font-weight: bold;
-        }
-        .student-answer-section {
-            margin: 0.3em 0 0.6em 0;
-            padding: 0.5em;
-            background-color: #fffacd;
-            border-left: 3px solid #ffa500;
-        }
-        .student-answer-section h3 {
-            margin: 0 0 0.3em 0;
-            color: #d2691e;
-            font-size: 10pt;
-            font-weight: bold;
-        }
-        .answer-placeholder {
-            padding: 0.4em;
-            background-color: white;
-            border: 1px solid #ddd;
-            min-height: 2em;
-            font-size: 10pt;
-        }
-        h1 {
-            color: #000;
-            font-size: 14pt;
-            font-weight: bold;
-            margin: 0.5em 0 0.3em 0;
-            padding: 0;
-            border-bottom: none;
-        }
-        h2 {
-            color: #000;
-            font-size: 11pt;
-            font-weight: bold;
-            margin: 0.5em 0 0.3em 0;
-            padding: 0;
-            background: none;
-        }
-        h2.page-break {
-            page-break-before: always;
-            margin-top: 2em;
-        }
-        p {
-            margin: 0.3em 0;
-            line-height: 1.3;
-        }
-        figure {
-            margin: 0.5em 0;
-        }
-        table {
-            margin: 0.5em auto;
-            font-size: 10pt;
-        }
-        ul, ol {
-            margin: 0.3em 0;
-            padding-left: 1.5em;
-        }
-        li {
-            margin: 0.2em 0;
-        }
+        @page { margin: 0.75in; }
+        body { font-family: 'Computer Modern', 'Latin Modern', 'Times New Roman', serif; font-size: 11pt; line-height: 1.3; }
+        .question-version { margin: 0; padding: 0; }
+        .rubric-image { display: block; margin: 0.5em auto; max-width: 400px; max-height: 250px; }
+        blockquote { background-color: #f0f0f0; border-left: 3px solid #666; padding: 0.4em 0.8em; }
+        .student-answer-section { margin: 0.3em 0 0.6em 0; padding: 0.5em; background-color: #fffacd; border-left: 3px solid #ffa500; }
+        .answer-placeholder { padding: 0.4em; background-color: white; border: 1px solid #ddd; min-height: 2em; }
+        .pagebreakbefore {   break-before: page; page-break-before: always;  }
     """
-    
     if soup.head:
         soup.head.append(style_tag)
     
+    debug_print("Question structure and placeholders added successfully")
     return str(soup)
 
 
 def convert_rubric_to_templates(config: dict) -> Dict[str, str]:
-    """
-    Main conversion function.
+    """Main conversion function."""
+    debug_print("=== STARTING FULL RUBRIC CONVERSION ===")
+    debug_print(f"Total question groups to process: {len(config.get('question_groups', []))}")
     
-    Workflow:
-    1. Find rubric .tex file in rubrics/quizX/
-    2. Copy all images to templates/quizX/images/
-    3. Extract and convert each question group
-    4. Add structure and placeholders
-    """
     rubric_folder = config['rubric_folder']
     quiz_id = config['quiz_id']
-    
-    # Find rubric file
+   
     rubric_file = find_rubric_file(rubric_folder)
     print(f"\n📝 Converting rubric: {rubric_file}")
-    
-    # Copy images
-    print(f"    - Copying image files...")
+   
     copy_images_to_templates(rubric_folder, quiz_id)
-    
+   
     templates = {}
-    for group in config['question_groups']:
-        print(f"\n  Processing {group['name']} ({group['id']})...")
-        print(f"    - Extracting lines {group['latex_line_range'][0]}-{group['latex_line_range'][1]}")
+    for i, group in enumerate(config['question_groups'], 1):
+        debug_print(f"\n[Main Group Loop {i}/{len(config['question_groups'])}] Processing {group['name']} ({group['id']})")
+        print(f"\n Processing {group['name']} ({group['id']})...")
         
-        # Extract section
         latex_content = extract_latex_section(rubric_file, group['latex_line_range'])
-        
-        # Preprocess
-        print(f"    - Preprocessing LaTeX...")
         image_map = group.get('image_map', None)
-        if image_map:
-            print(f"      - Replacing TikZ with images (manual mapping)...")
+        
         latex_content = preprocess_exam_latex(latex_content, image_map)
-        
-        # Convert to HTML
-        print(f"    - Converting to HTML with Pandoc...")
         html = latex_to_html_pandoc(latex_content, group['id'])
-        
-        # Fix image paths
-        print(f"    - Fixing image paths...")
         html = fix_image_paths(html)
-        
-        # Add structure
-        print(f"    - Adding question structure and answer placeholders...")
         html = add_question_structure_and_placeholders(html, group)
-        
+       
         templates[group['id']] = html
-        print(f"    ✓ Template complete for {group['id']}")
-    
+        print(f" ✓ Template complete for {group['id']}")
+   
+    debug_print("=== RUBRIC CONVERSION COMPLETED SUCCESSFULLY ===")
     return templates
 
 
 def save_templates(templates: Dict[str, str], quiz_id: int) -> None:
     """Save templates to disk."""
+    debug_print(f"Saving {len(templates)} templates for quiz {quiz_id}")
+    
     output_dir = Path(f"templates/quiz{quiz_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    for group_id, html in templates.items():
+   
+    for i, (group_id, html) in enumerate(templates.items(), 1):
+        debug_print(f"  [Save Loop {i}/{len(templates)}] Saving {group_id}_template.html")
         output_file = output_dir / f"{group_id}_template.html"
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html)
-        print(f"\n  💾 Saved: {output_file}")
+        debug_print(f"    → Saved {len(html):,} characters")
+        print(f"\n 💾 Saved: {output_file}")
+    
+    debug_print("All templates saved successfully")

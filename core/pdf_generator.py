@@ -6,11 +6,12 @@ Critical for math-heavy content where equations need proper rendering.
 """
 
 from playwright.async_api import async_playwright
+from pypdf import PdfReader, PdfWriter, PageObject
 from pathlib import Path
 import asyncio
 
 
-async def generate_pdf(html_content: str, output_path: str, html_file_path: str = None) -> bool:
+async def generate_pdf(html_content: str, output_path: str, html_file_path: str = None, exp_pages = None) -> bool:
     """
     Convert HTML to PDF using Playwright with MathJax support.
     
@@ -39,20 +40,7 @@ async def generate_pdf(html_content: str, output_path: str, html_file_path: str 
                 await page.set_content(html_content, timeout=60000)
             
             await page.wait_for_load_state('networkidle')
-            
-            # Wait for MathJax to finish rendering
-            try:
-                await page.wait_for_function(
-                    'window.MathJax && window.MathJax.startup && window.MathJax.startup.promise',
-                    timeout=10000
-                )
-                await page.evaluate('MathJax.startup.promise')
-                
-                # Give a bit more time for complex equations
-                await page.wait_for_timeout(1000)
-                
-            except Exception as e:
-                print(f"      ⚠ MathJax timeout (continuing anyway): {e}")
+
             
             # Generate PDF
             await page.pdf(
@@ -68,6 +56,21 @@ async def generate_pdf(html_content: str, output_path: str, html_file_path: str 
             )
             
             await browser.close()
+
+            if exp_pages is not None:
+                reader = PdfReader(output_path)
+                writer = PdfWriter()
+
+                for page in reader.pages:
+                    writer.add_page(page)
+                current_pages = len(reader.pages)
+                if current_pages < exp_pages:
+                    pages_to_add = exp_pages - current_pages
+                    for _ in range(pages_to_add):
+                        writer.add_blank_page()
+                    with open(output_path, "wb") as f:
+                        writer.write(f)
+            
             return True
             
     except Exception as e:

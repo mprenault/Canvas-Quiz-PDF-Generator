@@ -28,10 +28,12 @@ QUIZ_CONFIG = {
             #     # ... map each version to its image file
             # }
             'page_break': 'same-page',
+            #each-part for page break before each part
+            #each-part-not-first for page break before each part except part a
             # Optional: expected number of pages per student PDF.
             # Any PDF exceeding this count is auto-moved to a separate
             # *_overflow_merged.pdf instead of the main merged PDF.
-            # 'expected_pages': 2,
+            'expected_pages': 2,
         },
         {
             'id': 'q2',
@@ -41,7 +43,7 @@ QUIZ_CONFIG = {
             'latex_line_range': (703, 1202),
             'num_versions': 5,
             'points': 6,
-            'page_break': 'each-part',
+            'page_break': 'same-page',
             # 'expected_pages': 4,
         }
     ]
